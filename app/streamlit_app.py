@@ -86,6 +86,39 @@ PHASE_ICONS = {
     "complete": "🏁",
 }
 
+FEEDBACK_TEMPLATES: dict[str, dict[str, str]] = {
+    "model_decision": {
+        "强调可解释性": "请优先选择可解释、便于论文表述的模型，并补充模型适用条件、失效场景和与基线模型的对比理由。",
+        "增强鲁棒性": "请重新检查主模型对缺失值、异常值、小样本和参数扰动的鲁棒性，并在方案中加入敏感性分析。",
+        "贴合题目任务": "请逐个子问题核对模型是否覆盖题目要求，避免只给通用模型；每个模型需要对应具体输入、输出和评价指标。",
+    },
+    "experiment_plan": {
+        "补充消融实验": "请加入消融实验，说明去掉关键变量、约束或模型模块后结果如何变化。",
+        "补充基线对比": "请加入至少一个简单基线和一个竞争模型，并明确评价指标、随机种子和复现实验设置。",
+        "控制数据泄漏": "请重新检查训练/验证/测试划分，避免时间泄漏、目标泄漏和同源样本重复出现在不同集合。",
+    },
+    "code_plan": {
+        "增加可复现性": "请在代码计划中明确随机种子、输入输出文件、日志位置和失败重试策略。",
+        "细化文件职责": "请把数据读取、建模、评估和制图拆分为清晰函数，并说明每个函数的输入输出契约。",
+        "加入诊断输出": "请增加数据质量检查、模型指标表、关键中间结果和异常处理说明。",
+    },
+    "result_analysis": {
+        "强化结论证据": "请把每条核心结论绑定到具体结果表、图表或指标，并说明该结论的局限性。",
+        "补充异常解释": "请分析异常值、反常趋势和模型表现较差的子问题，避免只描述正向结果。",
+        "增加竞赛表达": "请把结果分析改写成论文可直接使用的表述，突出可复现数值、对比提升和现实解释。",
+    },
+    "paper_outline": {
+        "突出解题主线": "请重排提纲，使问题分析、模型建立、求解、结果验证和结论建议之间的逻辑链更清晰。",
+        "绑定证据编号": "请为每个结果章节补充证据 ID 或结果表来源，避免后续写作出现无证据结论。",
+        "压缩弱章节": "请合并重复或空泛章节，把篇幅留给模型推导、结果分析、灵敏度分析和优缺点。",
+    },
+    "language_review": {
+        "消除口语化": "请删除聊天式语气、占位符和泛泛承诺，改成正式竞赛论文语言。",
+        "统一术语": "请统一变量、模型、图表和章节术语，确保摘要、正文、公式和结论命名一致。",
+        "提高摘要密度": "请增强摘要的信息密度，补足方法、关键数值结果、验证方式和主要结论。",
+    },
+}
+
 st.set_page_config(page_title="数学建模智能体 · 阶段工作台", page_icon="📐", layout="wide")
 
 
@@ -325,6 +358,70 @@ def _default_focus_phase(state: WorkflowState) -> WorkflowPhase:
     return state.phase
 
 
+def _phase_status_counts(state: WorkflowState) -> dict[str, int]:
+    counts = {status.value: 0 for status in PhaseStatus}
+    for phase in WorkflowPhase:
+        status = state.get_phase_status(phase)
+        counts[status.value] = counts.get(status.value, 0) + 1
+    return counts
+
+
+def _phase_completion_ratio(state: WorkflowState) -> float:
+    counts = _phase_status_counts(state)
+    done = counts.get(PhaseStatus.COMPLETED.value, 0) + counts.get(PhaseStatus.APPROVED.value, 0)
+    return min(done / max(len(list(WorkflowPhase)), 1), 1.0)
+
+
+def _next_user_action(state: WorkflowState) -> str:
+    paused = _find_paused_phase(state)
+    if paused:
+        return f"确认或返工：{paused.label}"
+    if state.errors:
+        return "查看最近错误并决定是否从相关阶段重跑"
+    if state.phase == WorkflowPhase.COMPLETE or state.get_phase_status(WorkflowPhase.COMPLETE) == PhaseStatus.COMPLETED:
+        return "检查产物并下载导出文件"
+    return f"继续执行：{state.phase.label}"
+
+
+def _feedback_templates_for_phase(phase: WorkflowPhase) -> dict[str, str]:
+    return FEEDBACK_TEMPLATES.get(phase.value, {})
+
+
+def _split_csv_items(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _revision_target_options(state: WorkflowState) -> dict[str, str]:
+    options = {
+        "paper_outline": "论文提纲",
+        "paper_draft": "论文全文",
+        "model_decision": "模型决策",
+    }
+    if state.paper_outline:
+        for index, section in enumerate(state.paper_outline.sections, start=1):
+            section_id = str(section.get("id") or f"section_{index}").strip()
+            title = str(section.get("title") or section_id).strip()
+            if section_id:
+                options[f"paper_section:{section_id}"] = f"论文章节：{title}"
+    if state.review_findings and state.review_findings.issues:
+        for index, issue in enumerate(state.review_findings.issues, start=1):
+            issue_id = str(issue.get("id") or issue.get("title") or index).strip()
+            label = str(issue.get("title") or issue.get("issue") or issue.get("message") or issue_id).strip()
+            options[f"review_finding:{issue_id}"] = f"审稿问题：{label[:36]}"
+    return options
+
+
+def render_workbench_overview(state: WorkflowState) -> None:
+    ratio = _phase_completion_ratio(state)
+    counts = _phase_status_counts(state)
+    st.subheader("工作台总览")
+    st.progress(ratio, text=f"{int(ratio * 100)}% · {_next_user_action(state)}")
+    overview = st.columns(3)
+    overview[0].metric("已完成", counts.get(PhaseStatus.COMPLETED.value, 0))
+    overview[1].metric("待确认", counts.get(PhaseStatus.WAITING_FOR_USER.value, 0))
+    overview[2].metric("需返工", counts.get(PhaseStatus.NEEDS_REVISION.value, 0))
+
+
 def render_phase_nav(state: WorkflowState | None) -> WorkflowPhase | None:
     """Render phase navigation sidebar. Returns the phase the user clicked."""
     with st.sidebar:
@@ -332,6 +429,9 @@ def render_phase_nav(state: WorkflowState | None) -> WorkflowPhase | None:
         if state is None:
             st.info("尚未开始运行")
             return None
+
+        render_workbench_overview(state)
+        st.divider()
 
         phase_options: list[str] = []
         phase_map: dict[str, WorkflowPhase] = {}
@@ -666,6 +766,25 @@ def render_phase_focus(phase: WorkflowPhase, state: WorkflowState, formats: list
     if state.get_phase_status(phase) == PhaseStatus.WAITING_FOR_USER:
         st.warning(f"该阶段正在等待确认。继续后会影响：{_downstream_phase_labels(phase)}。")
 
+    phase_decisions = [d for d in state.decisions if d.get("phase") == phase.value]
+    stored_feedback = state.notes.get(f"user_feedback_{phase.value}", "")
+    if stored_feedback or phase_decisions:
+        with st.expander("本阶段交互记录", expanded=False):
+            if stored_feedback:
+                st.markdown("**最近反馈**")
+                st.write(stored_feedback)
+            if phase_decisions:
+                decision_rows = [
+                    {
+                        "时间": d.get("timestamp", "")[:19],
+                        "操作": d.get("action", ""),
+                        "操作者": d.get("operator", ""),
+                        "备注": d.get("notes", ""),
+                    }
+                    for d in phase_decisions[-8:]
+                ]
+                st.dataframe(pd.DataFrame(decision_rows), use_container_width=True, hide_index=True)
+
     if phase == WorkflowPhase.PROBLEM_ANALYSIS:
         tab_problem(state)
     elif phase in {WorkflowPhase.MODEL_PROPOSAL, WorkflowPhase.MODEL_CRITIQUE, WorkflowPhase.MODEL_DECISION}:
@@ -724,9 +843,25 @@ def render_action_bar(phase: WorkflowPhase, state: WorkflowState, wf: ModelingWo
             st.rerun()
 
     elif action == "带反馈重跑":
+        feedback_key = f"redo_feedback_{phase.value}"
+        templates = _feedback_templates_for_phase(phase)
+        if templates:
+            template_names = ["不使用模板", *templates.keys()]
+            selected_template = st.selectbox(
+                "反馈模板",
+                options=template_names,
+                key=f"feedback_template_{phase.value}",
+            )
+            if selected_template != "不使用模板":
+                st.caption(templates[selected_template])
+                if st.button("插入该模板", key=f"insert_feedback_template_{phase.value}"):
+                    current = st.session_state.get(feedback_key, "").strip()
+                    addition = templates[selected_template]
+                    st.session_state[feedback_key] = f"{current}\n{addition}".strip() if current else addition
+                    st.rerun()
         feedback = st.text_area(
             "反馈意见",
-            key=f"redo_feedback_{phase.value}",
+            key=feedback_key,
             placeholder="请描述需要调整的结论、约束、指标或写作要求...",
         )
         can_submit = bool(feedback.strip())
@@ -779,10 +914,46 @@ def render_edit_form(phase: WorkflowPhase, state: WorkflowState) -> dict | None:
             return edits
     elif phase == WorkflowPhase.PAPER_OUTLINE:
         st.subheader("编辑论文提纲")
+        revised_sections: list[dict[str, Any]] = []
         if state.paper_outline:
-            for sec in state.paper_outline.sections:
-                st.checkbox(f"{sec.get('title', '')}", value=True, key=f"sec_{sec.get('id','')}")
+            st.caption("取消勾选可移除章节；证据 ID 用英文逗号分隔。")
+            for index, sec in enumerate(state.paper_outline.sections):
+                section_id = str(sec.get("id") or f"section_{index + 1}")
+                with st.expander(f"{index + 1}. {sec.get('title', section_id)}", expanded=False):
+                    enabled = st.checkbox("保留该章节", value=True, key=f"outline_keep_{index}_{section_id}")
+                    title = st.text_input(
+                        "章节标题",
+                        value=str(sec.get("title", "")),
+                        key=f"outline_title_{index}_{section_id}",
+                    )
+                    evidence_ids = st.text_input(
+                        "证据 ID",
+                        value=", ".join(sec.get("evidence_ids", []) or []),
+                        key=f"outline_evidence_{index}_{section_id}",
+                    )
+                    if enabled:
+                        updated = dict(sec)
+                        updated["id"] = section_id
+                        updated["title"] = title.strip() or section_id
+                        updated["evidence_ids"] = _split_csv_items(evidence_ids)
+                        revised_sections.append(updated)
+        else:
+            st.info("当前尚无可编辑提纲，可先记录修改意见并继续。")
+
+        new_count = st.number_input("追加空白章节数", min_value=0, max_value=5, value=0, step=1)
+        for index in range(int(new_count)):
+            section_id = st.text_input("新增章节 ID", value=f"custom_{index + 1}", key=f"outline_new_id_{index}")
+            title = st.text_input("新增章节标题", key=f"outline_new_title_{index}")
+            evidence_ids = st.text_input("新增章节证据 ID", key=f"outline_new_evidence_{index}")
+            if section_id.strip() and title.strip():
+                revised_sections.append({
+                    "id": section_id.strip(),
+                    "title": title.strip(),
+                    "evidence_ids": _split_csv_items(evidence_ids),
+                })
         if st.button("💾 保存提纲", key="save_outline"):
+            if revised_sections:
+                edits["sections"] = revised_sections
             return edits
     else:
         st.subheader("编辑确认意见")
@@ -1070,9 +1241,11 @@ def main() -> None:
                             st.session_state["selected_phase"] = (_find_paused_phase(state) or state.phase).value
                             st.rerun()
 
+                    revision_targets = _revision_target_options(state)
                     artifact_target = st.selectbox(
                         "修订产物",
-                        options=["paper_outline", "paper_draft", "model_decision"],
+                        options=list(revision_targets.keys()),
+                        format_func=lambda value: revision_targets.get(value, value),
                     )
                     artifact_feedback = st.text_area("修订意见", key="artifact_feedback")
                     if st.button("🔧 修订产物", key="btn_revise_artifact"):

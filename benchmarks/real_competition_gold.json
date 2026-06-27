@@ -1,0 +1,132 @@
+[
+  {
+    "case_id": "cumcm-2010-a",
+    "expected_task_types": ["statistics", "classification"],
+    "acceptable_primary_models": ["parameter_identification", "weighted_least_squares", "nonlinear_fit"]
+  },
+  {
+    "case_id": "cumcm-2010-b",
+    "expected_task_types": ["evaluation", "forecast"],
+    "acceptable_primary_models": ["entropy_weights", "topsis_rank", "trend_forecast"]
+  },
+  {
+    "case_id": "cumcm-2011-b",
+    "expected_task_types": ["network", "optimization"],
+    "acceptable_primary_models": ["graph_shortest_paths", "resource_allocation", "scheduling_plan"]
+  },
+  {
+    "case_id": "cumcm-2012-a",
+    "expected_task_types": ["evaluation", "statistics"],
+    "acceptable_primary_models": ["anova_analysis", "hypothesis_tests", "entropy_weights"]
+  },
+  {
+    "case_id": "cumcm-2017-a",
+    "expected_task_types": ["statistics", "classification"],
+    "acceptable_primary_models": ["parameter_identification", "image_registration", "nonlinear_fit"]
+  },
+  {
+    "case_id": "cumcm-2018-a",
+    "expected_task_types": ["simulation", "optimization", "statistics"],
+    "acceptable_primary_models": ["heat_conduction", "nonlinear_optimization", "sensitivity_analysis"]
+  },
+  {
+    "case_id": "cumcm-2018-b",
+    "expected_task_types": ["optimization"],
+    "acceptable_primary_models": ["scheduling_plan", "integer_programming", "monte_carlo"]
+  },
+  {
+    "case_id": "cumcm-2019-a",
+    "expected_task_types": ["simulation", "optimization", "statistics"],
+    "acceptable_primary_models": ["parameter_identification", "optimal_control", "nonlinear_fit"]
+  },
+  {
+    "case_id": "cumcm-2019-d",
+    "expected_task_types": ["statistics"],
+    "acceptable_primary_models": ["linear_regression", "weighted_least_squares", "gradient_boosting"]
+  },
+  {
+    "case_id": "cumcm-2020-a",
+    "expected_task_types": ["simulation", "optimization"],
+    "acceptable_primary_models": ["heat_conduction", "optimal_control", "nonlinear_optimization"]
+  },
+  {
+    "case_id": "cumcm-2020-c",
+    "expected_task_types": ["classification", "evaluation", "optimization", "statistics"],
+    "acceptable_primary_models": ["logistic_classifier", "var_cvar_risk", "resource_allocation"]
+  },
+  {
+    "case_id": "cumcm-2021-a",
+    "expected_task_types": ["optimization", "simulation", "statistics"],
+    "acceptable_primary_models": ["nonlinear_optimization", "weighted_least_squares", "parameter_identification"]
+  },
+  {
+    "case_id": "cumcm-2021-e",
+    "expected_task_types": ["classification"],
+    "acceptable_primary_models": ["knn_classifier", "logistic_classifier", "naive_bayes_classifier", "pca"]
+  },
+  {
+    "case_id": "cumcm-2022-a",
+    "expected_task_types": ["simulation", "optimization"],
+    "acceptable_primary_models": ["harmonic_oscillator", "nonlinear_optimization", "optimal_control"]
+  },
+  {
+    "case_id": "cumcm-2022-c",
+    "expected_task_types": ["classification", "statistics"],
+    "acceptable_primary_models": ["knn_classifier", "logistic_classifier", "naive_bayes_classifier", "pca"]
+  },
+  {
+    "case_id": "cumcm-2023-a",
+    "expected_task_types": ["simulation", "optimization", "statistics"],
+    "acceptable_primary_models": ["nonlinear_optimization", "multiobjective_optimization", "monte_carlo"]
+  },
+  {
+    "case_id": "cumcm-2023-b",
+    "expected_task_types": ["statistics", "simulation", "optimization"],
+    "acceptable_primary_models": ["weighted_least_squares", "resource_allocation", "nonlinear_optimization"]
+  },
+  {
+    "case_id": "cumcm-2023-c",
+    "expected_task_types": ["forecast", "statistics", "optimization"],
+    "acceptable_primary_models": ["seasonal_forecast", "inventory_policy", "nonlinear_optimization"]
+  },
+  {
+    "case_id": "cumcm-2023-e",
+    "expected_task_types": ["forecast", "statistics", "optimization"],
+    "acceptable_primary_models": ["seasonal_forecast", "trend_forecast", "optimal_control"]
+  },
+  {
+    "case_id": "cumcm-2024-b",
+    "expected_task_types": ["statistics", "optimization"],
+    "acceptable_primary_models": ["hypothesis_tests", "monte_carlo", "resource_allocation"]
+  },
+  {
+    "case_id": "cumcm-2024-c",
+    "expected_task_types": ["forecast", "simulation", "optimization", "statistics"],
+    "acceptable_primary_models": ["integer_programming", "multiobjective_optimization", "monte_carlo"]
+  },
+  {
+    "case_id": "cumcm-2024-e",
+    "expected_task_types": ["classification", "evaluation", "network", "optimization", "statistics"],
+    "acceptable_primary_models": ["traffic_flow", "graph_shortest_paths", "seasonal_forecast"]
+  },
+  {
+    "case_id": "cumcm-2025-b",
+    "expected_task_types": ["statistics"],
+    "acceptable_primary_models": ["parameter_identification", "fft_frequency_analysis", "nonlinear_fit"]
+  },
+  {
+    "case_id": "cumcm-2025-c",
+    "expected_task_types": ["classification", "evaluation", "statistics", "optimization"],
+    "acceptable_primary_models": ["logistic_classifier", "gradient_boosting", "nonlinear_optimization"]
+  },
+  {
+    "case_id": "cumcm-2025-d",
+    "expected_task_types": ["network", "simulation", "optimization"],
+    "acceptable_primary_models": ["graph_shortest_paths", "bernoulli_flow", "monte_carlo"]
+  },
+  {
+    "case_id": "cumcm-2025-e",
+    "expected_task_types": ["classification", "statistics", "forecast", "optimization"],
+    "acceptable_primary_models": ["gradient_boosting", "knn_classifier", "linear_regression"]
+  }
+]

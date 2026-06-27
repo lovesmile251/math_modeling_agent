@@ -1,0 +1,1 @@
+"""Competition benchmark case definitions."""

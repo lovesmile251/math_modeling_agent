@@ -1,0 +1,26 @@
+[
+  {
+    "case_id": "forecast_to_optimization",
+    "title": "需求预测与资源配置组合题",
+    "expected_task_types": ["forecast", "optimization"],
+    "acceptable_primary_models": ["trend_forecast", "seasonal_forecast", "grey_gm11"]
+  },
+  {
+    "case_id": "multi_indicator_evaluation",
+    "title": "多指标综合评价题",
+    "expected_task_types": ["evaluation"],
+    "acceptable_primary_models": ["entropy_weights", "topsis_rank", "ahp_weights"]
+  },
+  {
+    "case_id": "network_structure",
+    "title": "复杂网络结构与关键节点题",
+    "expected_task_types": ["network"],
+    "acceptable_primary_models": ["community_detection", "graph_centrality"]
+  },
+  {
+    "case_id": "classification_validation",
+    "title": "分类识别与模型检验题",
+    "expected_task_types": ["classification"],
+    "acceptable_primary_models": ["logistic_classifier", "knn_classifier", "naive_bayes_classifier"]
+  }
+]

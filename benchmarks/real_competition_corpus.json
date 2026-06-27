@@ -1,0 +1,711 @@
+[
+  {
+    "case_id": "cumcm-2010-a",
+    "year": 2010,
+    "problem": "A",
+    "title": "储油罐的变位识别与罐容表标定",
+    "statement_path": "1516344309240\\2010A\\cumcm2010A.docx",
+    "attachment_paths": [
+      "1516344309240\\2010A\\问题A附件1：实验采集数据表.xls",
+      "1516344309240\\2010A\\问题A附件2：实际采集数据表.xls"
+    ],
+    "statement_chars": 743
+  },
+  {
+    "case_id": "cumcm-2010-b",
+    "year": 2010,
+    "problem": "B",
+    "title": "2010年上海世博会影响力的定量评估",
+    "statement_path": "1516344309240\\2010B\\cumcm2010B.docx",
+    "attachment_paths": [],
+    "statement_chars": 213
+  },
+  {
+    "case_id": "cumcm-2010-c",
+    "year": 2010,
+    "problem": "C",
+    "title": "输油管的布置",
+    "statement_path": "1516344309240\\2010C\\cumcm2010C.docx",
+    "attachment_paths": [],
+    "statement_chars": 685
+  },
+  {
+    "case_id": "cumcm-2010-d",
+    "year": 2010,
+    "problem": "D",
+    "title": "对学生宿舍设计方案的评价",
+    "statement_path": "1516344309240\\2010D\\cumcm2010D.docx",
+    "attachment_paths": [],
+    "statement_chars": 368
+  },
+  {
+    "case_id": "cumcm-2011-a",
+    "year": 2011,
+    "problem": "A",
+    "title": "城市表层土壤重金属污染分析",
+    "statement_path": "7223111\\A\\cumcm2011A.docx",
+    "attachment_paths": [
+      "7223111\\A\\cumcm2011A附件_数据.xls"
+    ],
+    "statement_chars": 705
+  },
+  {
+    "case_id": "cumcm-2011-b",
+    "year": 2011,
+    "problem": "B",
+    "title": "交巡警服务平台的设置与调度",
+    "statement_path": "7223111\\B\\cumcm2011B.docx",
+    "attachment_paths": [
+      "7223111\\B\\cumcm2011B附件2_全市六区交通网路和平台设置的数据表.xls"
+    ],
+    "statement_chars": 824
+  },
+  {
+    "case_id": "cumcm-2011-c",
+    "year": 2011,
+    "problem": "C",
+    "title": "企业退休职工养老金制度的改革",
+    "statement_path": "7223111\\C\\cumcm2011C.docx",
+    "attachment_paths": [
+      "7223111\\C\\cumcm2011C附件1_山东省职工平均工资.xls",
+      "7223111\\C\\cumcm2011C附件2_某企业分年龄职工数量及薪酬分布表.xls"
+    ],
+    "statement_chars": 1302
+  },
+  {
+    "case_id": "cumcm-2011-d",
+    "year": 2011,
+    "problem": "D",
+    "title": "天然肠衣搭配问题",
+    "statement_path": "7223111\\D\\cumcm2011D.docx",
+    "attachment_paths": [],
+    "statement_chars": 1260
+  },
+  {
+    "case_id": "cumcm-2012-a",
+    "year": 2012,
+    "problem": "A",
+    "title": "葡萄酒的评价",
+    "statement_path": "1346975481848\\A\\cumcm2012A.docx",
+    "attachment_paths": [
+      "1346975481848\\A\\附件1-葡萄酒品尝评分表.xls",
+      "1346975481848\\A\\附件2-指标总表.xls",
+      "1346975481848\\A\\附件3-芳香物质.xls"
+    ],
+    "statement_chars": 481
+  },
+  {
+    "case_id": "cumcm-2012-b",
+    "year": 2012,
+    "problem": "B",
+    "title": "太阳能小屋的设计",
+    "statement_path": "1346975481848\\B\\cumcm2012B.docx",
+    "attachment_paths": [
+      "1346975481848\\B\\cumcm2012B_附件3_三种类型的光伏电池(A单晶硅B多晶硅C非晶硅薄膜)组件设计参数和市场价格.xls",
+      "1346975481848\\B\\cumcm2012B附件4_山西大同典型气象年逐时参数及各方向辐射强度.xls"
+    ],
+    "statement_chars": 1015
+  },
+  {
+    "case_id": "cumcm-2012-c",
+    "year": 2012,
+    "problem": "C",
+    "title": "脑卒中发病环境因素分析及干预",
+    "statement_path": "1346975481848\\C\\cumcm2012C.docx",
+    "attachment_paths": [
+      "1346975481848\\C\\Appendix-C1\\data1.xls",
+      "1346975481848\\C\\Appendix-C1\\data2.xls",
+      "1346975481848\\C\\Appendix-C1\\data3.xls",
+      "1346975481848\\C\\Appendix-C1\\data4.xls",
+      "1346975481848\\C\\Appendix-C2\\data5.xls"
+    ],
+    "statement_chars": 539
+  },
+  {
+    "case_id": "cumcm-2012-d",
+    "year": 2012,
+    "problem": "D",
+    "title": "机器人避障问题",
+    "statement_path": "1346975481848\\D\\CUMCM_2012_D_Chinese.docx",
+    "attachment_paths": [],
+    "statement_chars": 1084
+  },
+  {
+    "case_id": "cumcm-2017-a",
+    "year": 2017,
+    "problem": "A",
+    "title": "CT系统参数标定及成像",
+    "statement_path": "1505390055604\\CUMCM2017Problems\\A\\CUMCM-2017-problem-A.docx",
+    "attachment_paths": [
+      "1505390055604\\CUMCM2017Problems\\A\\A题附件.xls"
+    ],
+    "statement_chars": 1082
+  },
+  {
+    "case_id": "cumcm-2017-b",
+    "year": 2017,
+    "problem": "B",
+    "title": "“拍照赚钱”的任务定价",
+    "statement_path": "1505390055604\\CUMCM2017Problems\\B\\CUMCM-2017-problem-B.docx",
+    "attachment_paths": [
+      "1505390055604\\CUMCM2017Problems\\B\\附件一：已结束项目任务数据.xls",
+      "1505390055604\\CUMCM2017Problems\\B\\附件三：新项目任务数据.xls",
+      "1505390055604\\CUMCM2017Problems\\B\\附件二：会员信息数据.xlsx"
+    ],
+    "statement_chars": 716
+  },
+  {
+    "case_id": "cumcm-2017-c",
+    "year": 2017,
+    "problem": "C",
+    "title": "颜色与物质浓度辨识",
+    "statement_path": "1505390055604\\CUMCM2017Problems\\C\\CUMCM-2017-problem-C.docx",
+    "attachment_paths": [
+      "1505390055604\\CUMCM2017Problems\\C\\Data1.xls",
+      "1505390055604\\CUMCM2017Problems\\C\\Data2.xls"
+    ],
+    "statement_chars": 435
+  },
+  {
+    "case_id": "cumcm-2017-d",
+    "year": 2017,
+    "problem": "D",
+    "title": "巡检线路的排班",
+    "statement_path": "1505390055604\\CUMCM2017Problems\\D\\CUMCM-2017-problem-D.docx",
+    "attachment_paths": [
+      "1505390055604\\CUMCM2017Problems\\D\\CUMCM-2017-appendix-D.xlsx"
+    ],
+    "statement_chars": 531
+  },
+  {
+    "case_id": "cumcm-2018-a",
+    "year": 2018,
+    "problem": "A",
+    "title": "高温作业专用服装设计",
+    "statement_path": "1536838145694\\2018-A-Chinese\\CUMCM-2018-Problem-A-Chinese.docx",
+    "attachment_paths": [
+      "1536838145694\\2018-A-Chinese\\CUMCM-2018-Problem-A-Chinese-Appendix.xlsx"
+    ],
+    "statement_chars": 587
+  },
+  {
+    "case_id": "cumcm-2018-b",
+    "year": 2018,
+    "problem": "B",
+    "title": "智能RGV的动态调度策略",
+    "statement_path": "1536838154826\\2018-B-Chinese\\CUMCM-2018-Problem-B-Chinese.docx",
+    "attachment_paths": [
+      "1536838154826\\2018-B-Chinese\\CUMCM-2018-Problem-B-Chinese-Appendix-2\\Case_1_result.xls",
+      "1536838154826\\2018-B-Chinese\\CUMCM-2018-Problem-B-Chinese-Appendix-2\\Case_2_result.xls",
+      "1536838154826\\2018-B-Chinese\\CUMCM-2018-Problem-B-Chinese-Appendix-2\\Case_3_result_1.xls",
+      "1536838154826\\2018-B-Chinese\\CUMCM-2018-Problem-B-Chinese-Appendix-2\\Case_3_result_2.xls"
+    ],
+    "statement_chars": 1038
+  },
+  {
+    "case_id": "cumcm-2018-d",
+    "year": 2018,
+    "problem": "D",
+    "title": "汽车总装线的配置问题",
+    "statement_path": "1536838163765\\2018-D-Chinese\\CUMCM-2018-problem-D-Chinese.docx",
+    "attachment_paths": [
+      "1536838163765\\2018-D-Chinese\\CUMCM-2018-Problem-D-Chinese-Appendix.xlsx"
+    ],
+    "statement_chars": 1592
+  },
+  {
+    "case_id": "cumcm-2019-a",
+    "year": 2019,
+    "problem": "A",
+    "title": "高压油管的压力控制",
+    "statement_path": "CUMCM2019Problems\\A-2019中文\\CUMCM-2019-Problem-A-Chinese.pdf",
+    "attachment_paths": [
+      "CUMCM2019Problems\\A-2019中文\\附件1-凸轮边缘曲线.xlsx",
+      "CUMCM2019Problems\\A-2019中文\\附件2-针阀运动曲线.xlsx",
+      "CUMCM2019Problems\\A-2019中文\\附件3-弹性模量与压力.xlsx"
+    ],
+    "statement_chars": 1529
+  },
+  {
+    "case_id": "cumcm-2019-b",
+    "year": 2019,
+    "problem": "B",
+    "title": "“同心协力”策略研究",
+    "statement_path": "CUMCM2019Problems\\B-2019中文\\CUMCM-1019-Problem-B-Chinese.pdf",
+    "attachment_paths": [],
+    "statement_chars": 1607
+  },
+  {
+    "case_id": "cumcm-2019-c",
+    "year": 2019,
+    "problem": "C",
+    "title": "机场的出租车问题",
+    "statement_path": "CUMCM2019Problems\\C-2019中文\\CUMCM-2019-Problem-C-Chinese.pdf",
+    "attachment_paths": [],
+    "statement_chars": 949
+  },
+  {
+    "case_id": "cumcm-2019-d",
+    "year": 2019,
+    "problem": "D",
+    "title": "空气质量数据的校准",
+    "statement_path": "CUMCM2019Problems\\D-2019中文\\CUMCM-2019-Problem-D-Chinese.pdf",
+    "attachment_paths": [
+      "CUMCM2019Problems\\D-2019中文\\附件1.csv",
+      "CUMCM2019Problems\\D-2019中文\\附件2.csv"
+    ],
+    "statement_chars": 687
+  },
+  {
+    "case_id": "cumcm-2019-e",
+    "year": 2019,
+    "problem": "E",
+    "title": "“薄利多销”分析",
+    "statement_path": "CUMCM2019Problems\\E-2019中文\\CUMCM-2019-Problem-E-Chinese.pdf",
+    "attachment_paths": [
+      "CUMCM2019Problems\\E-2019中文\\data\\附件1.csv",
+      "CUMCM2019Problems\\E-2019中文\\data\\附件2.csv",
+      "CUMCM2019Problems\\E-2019中文\\data\\附件3.csv",
+      "CUMCM2019Problems\\E-2019中文\\data\\附件4.csv",
+      "CUMCM2019Problems\\E-2019中文\\data\\附件5.xlsx"
+    ],
+    "statement_chars": 680
+  },
+  {
+    "case_id": "cumcm-2020-a",
+    "year": 2020,
+    "problem": "A",
+    "title": "炉温曲线",
+    "statement_path": "80DSDgpzqo!1o\\A\\2020A-炉温曲线.docx",
+    "attachment_paths": [
+      "80DSDgpzqo!1o\\A\\result.csv",
+      "80DSDgpzqo!1o\\A\\附件.xlsx"
+    ],
+    "statement_chars": 1600
+  },
+  {
+    "case_id": "cumcm-2020-b",
+    "year": 2020,
+    "problem": "B",
+    "title": "穿越沙漠",
+    "statement_path": "80DSDgpzqo!1o\\B\\2020B-穿越沙漠.docx",
+    "attachment_paths": [
+      "80DSDgpzqo!1o\\B\\Result.xlsx"
+    ],
+    "statement_chars": 1453
+  },
+  {
+    "case_id": "cumcm-2020-c",
+    "year": 2020,
+    "problem": "C",
+    "title": "中小微企业的信贷决策",
+    "statement_path": "80DSDgpzqo!1o\\C\\2020C-中小微企业的信贷决策.docx",
+    "attachment_paths": [
+      "80DSDgpzqo!1o\\C\\附件1：123家有信贷记录企业的相关数据.xlsx",
+      "80DSDgpzqo!1o\\C\\附件2：302家无信贷记录企业的相关数据.xlsx",
+      "80DSDgpzqo!1o\\C\\附件3：银行贷款年利率与客户流失率关系的统计数据.xlsx"
+    ],
+    "statement_chars": 983
+  },
+  {
+    "case_id": "cumcm-2020-d",
+    "year": 2020,
+    "problem": "D",
+    "title": "接触式轮廓仪的自动标注",
+    "statement_path": "80DSDgpzqo!1o\\D\\2020D-接触式轮廓仪的自动标注.docx",
+    "attachment_paths": [
+      "80DSDgpzqo!1o\\D\\附件1_工件1的测量数据.xlsx",
+      "80DSDgpzqo!1o\\D\\附件2_工件2的整体测量数据.xlsx",
+      "80DSDgpzqo!1o\\D\\附件3_工件2的局部测量数据（圆）.xlsx",
+      "80DSDgpzqo!1o\\D\\附件4_工件2的局部测量数据（角）.xlsx"
+    ],
+    "statement_chars": 1083
+  },
+  {
+    "case_id": "cumcm-2020-e",
+    "year": 2020,
+    "problem": "E",
+    "title": "校园供水系统智能管理",
+    "statement_path": "80DSDgpzqo!1o\\E\\2020E-校园供水系统智能管理.docx",
+    "attachment_paths": [
+      "80DSDgpzqo!1o\\E\\附件_一季度.xlsx",
+      "80DSDgpzqo!1o\\E\\附件_三季度.xlsx",
+      "80DSDgpzqo!1o\\E\\附件_二季度.xlsx",
+      "80DSDgpzqo!1o\\E\\附件_四季度.xlsx",
+      "80DSDgpzqo!1o\\E\\附件_水表层级.xlsx"
+    ],
+    "statement_chars": 633
+  },
+  {
+    "case_id": "cumcm-2021-a",
+    "year": 2021,
+    "problem": "A",
+    "title": "“FAST”主动反射面的形状调节",
+    "statement_path": "54kHat1Pboh9=\\A\\CUMCM2021-A.pdf",
+    "attachment_paths": [
+      "54kHat1Pboh9=\\A\\附件1.csv",
+      "54kHat1Pboh9=\\A\\附件2.csv",
+      "54kHat1Pboh9=\\A\\附件3.csv",
+      "54kHat1Pboh9=\\A\\附件4.xlsx"
+    ],
+    "statement_chars": 2163
+  },
+  {
+    "case_id": "cumcm-2021-b",
+    "year": 2021,
+    "problem": "B",
+    "title": "乙醇偶合制备 C4 烯烃",
+    "statement_path": "54kHat1Pboh9=\\B\\CUMCM2021-B.pdf",
+    "attachment_paths": [
+      "54kHat1Pboh9=\\B\\附件1.xlsx",
+      "54kHat1Pboh9=\\B\\附件2.xlsx"
+    ],
+    "statement_chars": 1154
+  },
+  {
+    "case_id": "cumcm-2021-c",
+    "year": 2021,
+    "problem": "C",
+    "title": "生产企业原材料的订购与运输",
+    "statement_path": "54kHat1Pboh9=\\C\\CUMCM2021-C.pdf",
+    "attachment_paths": [
+      "54kHat1Pboh9=\\C\\附件1 近5年402家供应商的相关数据.xlsx",
+      "54kHat1Pboh9=\\C\\附件2 近5年8家转运商的相关数据.xlsx",
+      "54kHat1Pboh9=\\C\\附件A 订购方案数据结果.xlsx",
+      "54kHat1Pboh9=\\C\\附件B 转运方案数据结果.xlsx"
+    ],
+    "statement_chars": 1568
+  },
+  {
+    "case_id": "cumcm-2021-d",
+    "year": 2021,
+    "problem": "D",
+    "title": "连铸切割的在线优化",
+    "statement_path": "54kHat1Pboh9=\\D\\CUMCM2021-D.pdf",
+    "attachment_paths": [],
+    "statement_chars": 1921
+  },
+  {
+    "case_id": "cumcm-2021-e",
+    "year": 2021,
+    "problem": "E",
+    "title": "中药材的鉴别",
+    "statement_path": "54kHat1Pboh9=\\E\\CUMCM2021-E.pdf",
+    "attachment_paths": [
+      "54kHat1Pboh9=\\E\\附件1.xlsx",
+      "54kHat1Pboh9=\\E\\附件2.xlsx",
+      "54kHat1Pboh9=\\E\\附件3.xlsx",
+      "54kHat1Pboh9=\\E\\附件4.xlsx"
+    ],
+    "statement_chars": 1342
+  },
+  {
+    "case_id": "cumcm-2022-a",
+    "year": 2022,
+    "problem": "A",
+    "title": "波浪能最大输出功率设计",
+    "statement_path": "48cK7N!Fs3X0s\\A题\\A题.pdf",
+    "attachment_paths": [
+      "48cK7N!Fs3X0s\\A题\\result1-1.xlsx",
+      "48cK7N!Fs3X0s\\A题\\result1-2.xlsx",
+      "48cK7N!Fs3X0s\\A题\\result3.xlsx",
+      "48cK7N!Fs3X0s\\A题\\附件3.xlsx",
+      "48cK7N!Fs3X0s\\A题\\附件4.xlsx"
+    ],
+    "statement_chars": 2698
+  },
+  {
+    "case_id": "cumcm-2022-b",
+    "year": 2022,
+    "problem": "B",
+    "title": "无人机遂行编队飞行中的纯方位无源定位",
+    "statement_path": "48cK7N!Fs3X0s\\B题.pdf",
+    "attachment_paths": [
+      "48cK7N!Fs3X0s\\A题\\result1-1.xlsx",
+      "48cK7N!Fs3X0s\\A题\\result1-2.xlsx",
+      "48cK7N!Fs3X0s\\A题\\result3.xlsx",
+      "48cK7N!Fs3X0s\\A题\\附件3.xlsx",
+      "48cK7N!Fs3X0s\\A题\\附件4.xlsx",
+      "48cK7N!Fs3X0s\\C题\\附件.xlsx",
+      "48cK7N!Fs3X0s\\E题\\附件.xlsx"
+    ],
+    "statement_chars": 1326
+  },
+  {
+    "case_id": "cumcm-2022-c",
+    "year": 2022,
+    "problem": "C",
+    "title": "古代玻璃制品的成分分析与鉴别",
+    "statement_path": "48cK7N!Fs3X0s\\C题\\C题.pdf",
+    "attachment_paths": [
+      "48cK7N!Fs3X0s\\C题\\附件.xlsx"
+    ],
+    "statement_chars": 1497
+  },
+  {
+    "case_id": "cumcm-2022-d",
+    "year": 2022,
+    "problem": "D",
+    "title": "气象报文信息卫星通信传输",
+    "statement_path": "48cK7N!Fs3X0s\\D题.pdf",
+    "attachment_paths": [
+      "48cK7N!Fs3X0s\\A题\\result1-1.xlsx",
+      "48cK7N!Fs3X0s\\A题\\result1-2.xlsx",
+      "48cK7N!Fs3X0s\\A题\\result3.xlsx",
+      "48cK7N!Fs3X0s\\A题\\附件3.xlsx",
+      "48cK7N!Fs3X0s\\A题\\附件4.xlsx",
+      "48cK7N!Fs3X0s\\C题\\附件.xlsx",
+      "48cK7N!Fs3X0s\\E题\\附件.xlsx"
+    ],
+    "statement_chars": 2038
+  },
+  {
+    "case_id": "cumcm-2022-e",
+    "year": 2022,
+    "problem": "E",
+    "title": "小批量物料的生产安排",
+    "statement_path": "48cK7N!Fs3X0s\\E题\\E题.pdf",
+    "attachment_paths": [
+      "48cK7N!Fs3X0s\\E题\\附件.xlsx"
+    ],
+    "statement_chars": 1629
+  },
+  {
+    "case_id": "cumcm-2023-a",
+    "year": 2023,
+    "problem": "A",
+    "title": "定日镜场的优化设计",
+    "statement_path": "2@Q@dFHtlmYSo\\A题\\A题.pdf",
+    "attachment_paths": [
+      "2@Q@dFHtlmYSo\\A题\\result2.xlsx",
+      "2@Q@dFHtlmYSo\\A题\\result3.xlsx",
+      "2@Q@dFHtlmYSo\\A题\\附件.xlsx"
+    ],
+    "statement_chars": 3999
+  },
+  {
+    "case_id": "cumcm-2023-b",
+    "year": 2023,
+    "problem": "B",
+    "title": "多波束测线问题",
+    "statement_path": "2@Q@dFHtlmYSo\\B题\\B题.pdf",
+    "attachment_paths": [
+      "2@Q@dFHtlmYSo\\B题\\result1.xlsx",
+      "2@Q@dFHtlmYSo\\B题\\result2.xlsx",
+      "2@Q@dFHtlmYSo\\B题\\附件.xlsx"
+    ],
+    "statement_chars": 2161
+  },
+  {
+    "case_id": "cumcm-2023-c",
+    "year": 2023,
+    "problem": "C",
+    "title": "蔬菜类商品的自动定价与补货决策",
+    "statement_path": "2@Q@dFHtlmYSo\\C题\\C题.pdf",
+    "attachment_paths": [
+      "2@Q@dFHtlmYSo\\C题\\附件1.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件2.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件3.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件4.xlsx"
+    ],
+    "statement_chars": 1135
+  },
+  {
+    "case_id": "cumcm-2023-d",
+    "year": 2023,
+    "problem": "D",
+    "title": "圈养湖羊的空间利用率",
+    "statement_path": "2@Q@dFHtlmYSo\\D题.pdf",
+    "attachment_paths": [
+      "2@Q@dFHtlmYSo\\A题\\result2.xlsx",
+      "2@Q@dFHtlmYSo\\A题\\result3.xlsx",
+      "2@Q@dFHtlmYSo\\A题\\附件.xlsx",
+      "2@Q@dFHtlmYSo\\B题\\result1.xlsx",
+      "2@Q@dFHtlmYSo\\B题\\result2.xlsx",
+      "2@Q@dFHtlmYSo\\B题\\附件.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件1.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件2.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件3.xlsx",
+      "2@Q@dFHtlmYSo\\C题\\附件4.xlsx",
+      "2@Q@dFHtlmYSo\\E题\\附件1.xlsx",
+      "2@Q@dFHtlmYSo\\E题\\附件2.xlsx",
+      "2@Q@dFHtlmYSo\\E题\\附件3.xlsx"
+    ],
+    "statement_chars": 2432
+  },
+  {
+    "case_id": "cumcm-2023-e",
+    "year": 2023,
+    "problem": "E",
+    "title": "黄河水沙监测数据分析",
+    "statement_path": "2@Q@dFHtlmYSo\\E题\\E题.pdf",
+    "attachment_paths": [
+      "2@Q@dFHtlmYSo\\E题\\附件1.xlsx",
+      "2@Q@dFHtlmYSo\\E题\\附件2.xlsx",
+      "2@Q@dFHtlmYSo\\E题\\附件3.xlsx"
+    ],
+    "statement_chars": 766
+  },
+  {
+    "case_id": "cumcm-2024-a",
+    "year": 2024,
+    "problem": "A",
+    "title": "“板凳龙” 闹元宵",
+    "statement_path": "2024zjhychn\\A题\\A题.pdf",
+    "attachment_paths": [
+      "2024zjhychn\\A题\\附件\\result1.xlsx",
+      "2024zjhychn\\A题\\附件\\result2.xlsx",
+      "2024zjhychn\\A题\\附件\\result4.xlsx"
+    ],
+    "statement_chars": 2338
+  },
+  {
+    "case_id": "cumcm-2024-b",
+    "year": 2024,
+    "problem": "B",
+    "title": "生产过程中的决策问题",
+    "statement_path": "2024zjhychn\\B题\\B题.pdf",
+    "attachment_paths": [],
+    "statement_chars": 1826
+  },
+  {
+    "case_id": "cumcm-2024-c",
+    "year": 2024,
+    "problem": "C",
+    "title": "农作物的种植策略",
+    "statement_path": "2024zjhychn\\C题\\C题.pdf",
+    "attachment_paths": [
+      "2024zjhychn\\C题\\附件1.xlsx",
+      "2024zjhychn\\C题\\附件2.xlsx",
+      "2024zjhychn\\C题\\附件3\\result1_1.xlsx",
+      "2024zjhychn\\C题\\附件3\\result1_2.xlsx",
+      "2024zjhychn\\C题\\附件3\\result2.xlsx"
+    ],
+    "statement_chars": 1501
+  },
+  {
+    "case_id": "cumcm-2024-d",
+    "year": 2024,
+    "problem": "D",
+    "title": "反潜航空深弹命中概率问题",
+    "statement_path": "2024zjhychn\\D题\\D题.pdf",
+    "attachment_paths": [],
+    "statement_chars": 1570
+  },
+  {
+    "case_id": "cumcm-2024-e",
+    "year": 2024,
+    "problem": "E",
+    "title": "交通流量管控",
+    "statement_path": "2024zjhychn\\E题\\E题.pdf",
+    "attachment_paths": [
+      "2024zjhychn\\E题\\附件1.xlsx",
+      "2024zjhychn\\E题\\附件2.csv"
+    ],
+    "statement_chars": 1059
+  },
+  {
+    "case_id": "cumcm-2025-a",
+    "year": 2025,
+    "problem": "A",
+    "title": "烟幕干扰弹的投放策略",
+    "statement_path": "56RoZe4zc@c3A\\A题\\A题.pdf",
+    "attachment_paths": [
+      "56RoZe4zc@c3A\\A题\\附件\\result1.xlsx",
+      "56RoZe4zc@c3A\\A题\\附件\\result2.xlsx",
+      "56RoZe4zc@c3A\\A题\\附件\\result3.xlsx"
+    ],
+    "statement_chars": 1606
+  },
+  {
+    "case_id": "cumcm-2025-b",
+    "year": 2025,
+    "problem": "B",
+    "title": "碳化硅外延层厚度的确定",
+    "statement_path": "56RoZe4zc@c3A\\B题\\B题.pdf",
+    "attachment_paths": [
+      "56RoZe4zc@c3A\\B题\\附件\\附件1.xlsx",
+      "56RoZe4zc@c3A\\B题\\附件\\附件2.xlsx",
+      "56RoZe4zc@c3A\\B题\\附件\\附件3.xlsx",
+      "56RoZe4zc@c3A\\B题\\附件\\附件4.xlsx"
+    ],
+    "statement_chars": 1060
+  },
+  {
+    "case_id": "cumcm-2025-c",
+    "year": 2025,
+    "problem": "C",
+    "title": "NIPT 的时点选择与胎儿的异常判定",
+    "statement_path": "56RoZe4zc@c3A\\C题\\C题.pdf",
+    "attachment_paths": [
+      "56RoZe4zc@c3A\\C题\\附件.xlsx"
+    ],
+    "statement_chars": 2362
+  },
+  {
+    "case_id": "cumcm-2025-d",
+    "year": 2025,
+    "problem": "D",
+    "title": "矿井突水水流漫延模型与逃生方案",
+    "statement_path": "56RoZe4zc@c3A\\D题\\D题.pdf",
+    "attachment_paths": [
+      "56RoZe4zc@c3A\\D题\\附件\\附件1.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件2.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result1-1.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result1-2.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result2-1.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result2-2.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result3-1.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result3-2.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result4-1.xlsx",
+      "56RoZe4zc@c3A\\D题\\附件\\附件3\\result4-2.xlsx"
+    ],
+    "statement_chars": 2352
+  },
+  {
+    "case_id": "cumcm-2025-e",
+    "year": 2025,
+    "problem": "E",
+    "title": "AI 辅助智能体测",
+    "statement_path": "56RoZe4zc@c3A\\E题\\E题.pdf",
+    "attachment_paths": [
+      "56RoZe4zc@c3A\\E题\\附件\\附件1\\运动者1的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件1\\运动者2的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者10第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者10第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者3第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者3第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者3第3次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者3第4次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者3第5次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者4第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者5第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者5第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者6第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者6第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者7第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者7第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者8第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者8第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整前\\运动者9第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者10调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者10调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者3调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者3调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者4调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者4调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者5调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者5调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者6调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者6调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者7调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者7调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者8调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者9调整后第1次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件3\\姿势调整后\\运动者9调整后第2次的跳远位置信息.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件4.xlsx",
+      "56RoZe4zc@c3A\\E题\\附件\\附件5\\运动者11的跳远位置信息.xlsx"
+    ],
+    "statement_chars": 949
+  }
+]

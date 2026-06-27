@@ -7,7 +7,7 @@ import pandas as pd
 from agents.base import Agent, K_PROBLEM_TYPE, K_SELECTED_MODEL_IDS, WorkflowState
 from models.social_network.campus import is_social_network_problem
 from tools.file_tool import write_text
-from tools.model_registry import registered_model_ids
+from tools.model_ids import normalize_model_ids
 
 
 class CodingAgent(Agent):
@@ -181,8 +181,6 @@ if __name__ == "__main__":
 
     def _selected_models(self, state: WorkflowState) -> list[str]:
         fallback = ["trend_forecast", "entropy_weights", "topsis_rank", "capacity_gap"]
-        # Dynamically resolve valid model IDs from the registry — no hardcoded list.
-        valid_models = registered_model_ids()
         raw = state.notes.get(K_SELECTED_MODEL_IDS)
         if not raw:
             return self._with_always_on(fallback)
@@ -192,7 +190,7 @@ if __name__ == "__main__":
             return self._with_always_on(fallback)
         if not isinstance(parsed, list):
             return self._with_always_on(fallback)
-        selected = [str(item) for item in parsed if str(item) in valid_models]
+        selected = normalize_model_ids(parsed).selected
         return self._with_always_on(selected)
 
     def _with_always_on(self, models: list[str]) -> list[str]:

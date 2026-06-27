@@ -208,6 +208,7 @@ def evaluate_paper_quality(
 
     # ── scoring (#8: aligned with award medians) ──
     score = _compute_score(issues, metrics)
+    metrics.update(_compute_dimension_scores(issues, metrics))
 
     if not issues:
         suggestions.append("论文质量门禁通过；后续重点做语言润色和版式检查。")
@@ -226,6 +227,10 @@ def format_quality_report(report: PaperQualityReport) -> str:
         f"- 图片引用数：{report.metrics['figures']}",
         f"- 关键词数量：{report.metrics.get('keywords', 0)}",
         f"- 参考文献标记数：{report.metrics.get('references', 0)}",
+        f"- 解题闭环分：{report.metrics.get('solution_score', report.score)}/100",
+        f"- 证据追溯分：{report.metrics.get('evidence_score', report.score)}/100",
+        f"- 论文结构分：{report.metrics.get('structure_score', report.score)}/100",
+        f"- 导出版式分：{report.metrics.get('export_score', report.score)}/100",
         "",
         "### 质量问题",
     ]
@@ -587,6 +592,45 @@ def _compute_score(issues: list[str], metrics: dict) -> int:
         score -= 10
 
     return max(0, score)
+
+
+def _compute_dimension_scores(issues: list[str], metrics: dict) -> dict[str, int]:
+    solution = 100
+    evidence = 100
+    structure = 100
+    export = 100
+
+    for issue in issues:
+        if any(term in issue for term in ("分问题", "模型数学骨架", "模型检验", "误差分析", "基准对比", "结果分析")):
+            solution -= 14
+        if any(term in issue for term in ("结果表", "图表", "引用的图片", "Reference", "Model claims", "摘要量化")):
+            evidence -= 14
+        if any(term in issue for term in ("缺少国奖论文", "缺少摘要", "摘要偏短", "参考文献", "章节")):
+            structure -= 12
+        if any(term in issue for term in ("LaTeX", "图片文件不存在")):
+            export -= 18
+
+    if metrics["equations"] < 8:
+        solution -= 10
+    if metrics["problem_sections"] < 3:
+        solution -= 8
+    if metrics["tables"] < 6:
+        evidence -= 10
+    if metrics["figures"] < 2:
+        evidence -= 8
+    if metrics["digits"] < 80:
+        evidence -= 6
+    if metrics["chars"] < AWARD_MEDIAN_CHARS:
+        structure -= 10
+    if metrics.get("references", 0) < AWARD_MEDIAN_REFERENCES:
+        structure -= 6
+
+    return {
+        "solution_score": max(0, min(100, solution)),
+        "evidence_score": max(0, min(100, evidence)),
+        "structure_score": max(0, min(100, structure)),
+        "export_score": max(0, min(100, export)),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,9 @@ from agents.base import (
     A_CODE,
     K_EXECUTION_STATUS,
     K_LLM_STATUS,
+    K_LLM_FAILURE_KIND,
     K_PAPER_QUALITY_SCORE,
+    K_PREWRITING_GATE_STATUS,
     K_REVIEW_REPORT,
     PhaseStatus,
     WorkflowPhase,
@@ -40,6 +42,7 @@ from app.config import WORKSPACE
 from app.config import PROJECT_ROOT, WorkspaceConfig
 from tools.file_tool import discover_data_files, list_data_files, read_problem_file, write_text
 from tools.llm_client import build_llm_client
+from tools.model_ids import normalize_model_ids
 from tools.logging_setup import setup_logging
 
 
@@ -526,8 +529,11 @@ class ModelingWorkflow:
                 if state.model_decision is None:
                     from agents.base import ModelDecision
                     state.model_decision = ModelDecision()
-                state.model_decision.selected_model_ids = edits["selected_model_ids"]
-                state.notes["selected_model_ids"] = json.dumps(edits["selected_model_ids"])
+                normalized = normalize_model_ids(edits["selected_model_ids"])
+                state.model_decision.selected_model_ids = normalized.selected
+                if normalized.dropped:
+                    state.notes["user_edit_dropped_model_ids"] = json.dumps(normalized.dropped, ensure_ascii=False)
+                state.notes["selected_model_ids"] = json.dumps(normalized.selected)
             if "baseline_model_id" in edits:
                 if state.model_decision is None:
                     from agents.base import ModelDecision
@@ -616,6 +622,12 @@ class ModelingWorkflow:
             if score >= 82:
                 break
 
+            stop_reason = self._writing_retry_stop_reason(state)
+            if stop_reason:
+                log.info("Skip WritingAgent retry: %s", stop_reason)
+                state.notes["writing_retry_stop_reason"] = stop_reason
+                break
+
             log.info(
                 "Paper quality %d < 82 — retry %d/%d (WritingAgent → ReviewAgent)",
                 score,
@@ -666,6 +678,32 @@ class ModelingWorkflow:
             attempt += 1
 
         return state
+
+    def _writing_retry_stop_reason(self, state: WorkflowState) -> str:
+        failure_kind = state.notes.get(K_LLM_FAILURE_KIND, "")
+        if failure_kind in {"quota", "auth", "billing"}:
+            return f"non-retryable LLM failure: {failure_kind}"
+        if state.notes.get(K_PREWRITING_GATE_STATUS) == "blocked":
+            return "pre-writing gate blocked missing core evidence"
+        for key, value in state.notes.items():
+            if key.endswith("_error") and _looks_like_non_retryable_llm_error(str(value)):
+                return "non-retryable LLM error"
+        return ""
+
+
+def _looks_like_non_retryable_llm_error(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "insufficient balance",
+            "quota",
+            "billing",
+            "402",
+            "unauthorized",
+            "invalid api key",
+        )
+    )
 
 
 def run_from_files(

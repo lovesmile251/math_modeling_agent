@@ -10,8 +10,12 @@ from agents.base import (
     K_EXECUTION_ATTEMPTS,
     K_EXECUTION_STATUS,
     K_MODELING_PLAN,
+    K_PAPER_EVIDENCE_SCORE,
+    K_PAPER_EXPORT_SCORE,
     K_PAPER_QUALITY_REPORT,
     K_PAPER_QUALITY_SCORE,
+    K_PAPER_SOLUTION_SCORE,
+    K_PAPER_STRUCTURE_SCORE,
     K_RESULT_ANALYSIS,
     K_REVIEW_REPORT,
     Agent,
@@ -73,6 +77,10 @@ class ReviewAgent(Agent):
             )
             state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
             state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+            state.notes[K_PAPER_SOLUTION_SCORE] = str(quality.metrics.get("solution_score", quality.score))
+            state.notes[K_PAPER_EVIDENCE_SCORE] = str(quality.metrics.get("evidence_score", quality.score))
+            state.notes[K_PAPER_STRUCTURE_SCORE] = str(quality.metrics.get("structure_score", quality.score))
+            state.notes[K_PAPER_EXPORT_SCORE] = str(quality.metrics.get("export_score", quality.score))
             paper_quality_text = format_quality_report(quality)
             if quality.score < 82:
                 findings.append(f"论文未达到国奖质量门禁：当前质量分 {quality.score}/100。")

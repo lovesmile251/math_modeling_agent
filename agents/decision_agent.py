@@ -13,6 +13,7 @@ from agents.base import (
 )
 from tools.prompt_loader import load_prompt
 from models.catalog import get_model_contract
+from tools.model_ids import canonical_model_id, normalize_model_ids
 
 log = logging.getLogger("mma.decision_agent")
 
@@ -47,6 +48,10 @@ class DecisionAgent(Agent):
             decision = self._heuristic_decision(state, critique)
             state.model_decision = decision
             state.notes["decision_agent_mode"] = "heuristic"
+
+        dropped = self._normalize_decision(decision)
+        if dropped:
+            state.notes["decision_agent_dropped_model_ids"] = json.dumps(dropped, ensure_ascii=False)
 
         # sync selected model IDs back to notes for downstream compatibility
         state.notes[K_SELECTED_MODEL_IDS] = json.dumps(decision.selected_model_ids, ensure_ascii=False)
@@ -113,6 +118,43 @@ class DecisionAgent(Agent):
         decision.rationale = "\n".join(rationale_lines[:30])
 
         return decision
+
+    def _normalize_decision(self, decision: ModelDecision) -> list[str]:
+        normalized = normalize_model_ids(decision.selected_model_ids)
+        selected_ids = normalized.selected
+        dropped = list(normalized.dropped)
+
+        primary = canonical_model_id(decision.primary_model_id)
+        if primary is None and decision.primary_model_id:
+            dropped.append(decision.primary_model_id)
+        baseline = canonical_model_id(decision.baseline_model_id)
+        if baseline is None and decision.baseline_model_id:
+            dropped.append(decision.baseline_model_id)
+
+        if primary and primary not in selected_ids:
+            selected_ids.insert(0, primary)
+        if baseline and baseline not in selected_ids:
+            selected_ids.append(baseline)
+
+        decision.selected_model_ids = selected_ids
+        decision.primary_model_id = primary or (selected_ids[0] if selected_ids else "")
+        if baseline and baseline != decision.primary_model_id:
+            decision.baseline_model_id = baseline
+        elif decision.primary_model_id:
+            contract = get_model_contract(decision.primary_model_id)
+            decision.baseline_model_id = next(
+                (model_id for model_id in contract.baseline_models if model_id in selected_ids),
+                "",
+            )
+            if not decision.baseline_model_id:
+                decision.baseline_model_id = next(
+                    (model_id for model_id in selected_ids if model_id != decision.primary_model_id),
+                    "",
+                )
+        else:
+            decision.baseline_model_id = ""
+
+        return list(dict.fromkeys(dropped))
 
     def _heuristic_decision(
         self, state: WorkflowState, critique: ModelCritique | None

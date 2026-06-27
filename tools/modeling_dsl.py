@@ -4,6 +4,7 @@ from typing import Any
 
 from agents.base import FormulationSpec, ProblemSpec
 from models.catalog import get_model_contract
+from tools.model_ids import normalize_model_ids
 
 
 def build_formulation(
@@ -13,6 +14,9 @@ def build_formulation(
     """Build a conservative mathematical formulation from structured tasks."""
     if problem_spec is None:
         return FormulationSpec(validation_issues=["missing structured problem specification"])
+
+    normalized_models = normalize_model_ids(selected_model_ids)
+    selected_model_ids = normalized_models.selected
 
     variables = [
         {
@@ -78,6 +82,10 @@ def build_formulation(
         assumptions=problem_spec.assumptions,
     )
     spec.validation_issues = validate_formulation(spec)
+    if normalized_models.dropped:
+        spec.validation_issues.append(
+            "dropped unregistered model_id(s): " + ", ".join(normalized_models.dropped)
+        )
     return spec
 
 

@@ -310,6 +310,7 @@ class LLMClient:
             "ok": False,
             "cache_hit": False,
             "error": _redact_secrets(str(last_error)),
+            "failure_kind": classify_llm_error(last_error),
             "caller": caller,
         }
         self._append_call_log(self.last_call)
@@ -592,6 +593,22 @@ def _error_status_code(exc: Exception) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+def classify_llm_error(exc: Exception | str | None) -> str:
+    if exc is None:
+        return ""
+    status_code = _error_status_code(exc) if isinstance(exc, Exception) else None
+    text = str(exc).lower()
+    if status_code == 402 or "insufficient balance" in text or "billing" in text:
+        return "quota"
+    if status_code in {401, 403} or "unauthorized" in text or "invalid api key" in text:
+        return "auth"
+    if status_code == 429 or "rate limit" in text:
+        return "rate_limit"
+    if status_code is not None and 400 <= status_code < 500:
+        return "client"
+    return ""
 
 
 def _safe_path_part(value: str) -> str:

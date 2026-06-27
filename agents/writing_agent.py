@@ -10,8 +10,15 @@ from agents.base import (
     A_PAPER_QUALITY,
     K_MODELING_PLAN,
     K_MODEL_SELECTION,
+    K_LLM_FAILURE_KIND,
     K_PAPER_QUALITY_REPORT,
     K_PAPER_QUALITY_SCORE,
+    K_PAPER_EVIDENCE_SCORE,
+    K_PAPER_EXPORT_SCORE,
+    K_PAPER_SOLUTION_SCORE,
+    K_PAPER_STRUCTURE_SCORE,
+    K_PREWRITING_GATE_REPORT,
+    K_PREWRITING_GATE_STATUS,
     K_PROBLEM_ANALYSIS,
     K_PROBLEM_TYPE,
     K_RESULT_ANALYSIS,
@@ -25,10 +32,16 @@ from agents.base import (
 )
 from tools.file_tool import write_text
 from tools.paper_quality import clean_paper_text, evaluate_paper_quality, format_quality_report
+from tools.prewriting_gate import (
+    evaluate_pre_writing_gate,
+    format_pre_writing_gate_report,
+    write_pre_writing_gate_report,
+)
 from tools.prompt_loader import load_prompt
 from tools.result_digest import build_result_digest
 from tools.paper_templates.general import GeneralPaperTemplate
 from tools.social_paper import build_social_network_paper
+from tools.llm_client import classify_llm_error
 
 log = logging.getLogger("mma.writing_agent")
 
@@ -63,6 +76,13 @@ class WritingAgent(Agent):
 
     def run(self, state: WorkflowState) -> WorkflowState:
         is_social = state.notes.get(K_PROBLEM_TYPE) == "social_network"
+        gate = evaluate_pre_writing_gate(state)
+        gate_path = write_pre_writing_gate_report(state, gate)
+        state.artifacts["prewriting_gate"] = gate_path
+        state.notes[K_PREWRITING_GATE_STATUS] = "passed" if gate.ok else "blocked"
+        state.notes[K_PREWRITING_GATE_REPORT] = format_pre_writing_gate_report(gate)
+        if not gate.ok:
+            return self._block_for_pre_writing_gate(state, gate)
 
         if state.llm and state.llm.enabled:
             try:
@@ -79,8 +99,7 @@ class WritingAgent(Agent):
                     if regenerated:
                         state.notes["writing_agent_regenerated"] = "true"
                     quality = evaluate_paper_quality(paper)
-                    state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
-                    state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+                    self._record_quality(state, quality)
                     quality_path = write_text(
                         state.workspace.paper_dir / "paper_quality_report.md",
                         state.notes[K_PAPER_QUALITY_REPORT],
@@ -114,8 +133,7 @@ class WritingAgent(Agent):
                 if refined:
                     state.notes["writing_agent_quality_refined"] = "true"
                 quality = evaluate_paper_quality(paper)
-                state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
-                state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+                self._record_quality(state, quality)
                 quality_path = write_text(state.workspace.paper_dir / "paper_quality_report.md", state.notes[K_PAPER_QUALITY_REPORT])
                 state.artifacts[A_PAPER_QUALITY] = quality_path
                 paper, quality = self._apply_polish(state, paper, quality)
@@ -125,6 +143,9 @@ class WritingAgent(Agent):
                 return state
             except Exception as exc:
                 state.notes["writing_agent_section_error"] = str(exc)
+                failure_kind = classify_llm_error(exc)
+                if failure_kind:
+                    state.notes[K_LLM_FAILURE_KIND] = failure_kind
                 log.warning("Section-by-section writing failed (%s), falling back to full-generation.", exc)
                 state.notes[K_WRITING_MODE] = "fallback"
 
@@ -136,8 +157,7 @@ class WritingAgent(Agent):
                 state.artifacts[A_PAPER] = paper_path
                 state.notes[K_WRITING_MODE] = "social_network_template"
                 quality = evaluate_paper_quality(paper)
-                state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
-                state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+                self._record_quality(state, quality)
                 quality_path = write_text(state.workspace.paper_dir / "paper_quality_report.md", state.notes[K_PAPER_QUALITY_REPORT])
                 state.artifacts[A_PAPER_QUALITY] = quality_path
                 paper, quality = self._apply_polish(state, paper, quality)
@@ -172,12 +192,38 @@ class WritingAgent(Agent):
         paper_path = write_text(state.workspace.paper_dir / "paper_draft.md", paper)
         state.artifacts[A_PAPER] = paper_path
         quality = evaluate_paper_quality(paper)
-        state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
-        state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+        self._record_quality(state, quality)
         quality_path = write_text(state.workspace.paper_dir / "paper_quality_report.md", state.notes[K_PAPER_QUALITY_REPORT])
         state.artifacts[A_PAPER_QUALITY] = quality_path
         paper, quality = self._apply_polish(state, paper, quality)
         return state
+
+    def _block_for_pre_writing_gate(self, state: WorkflowState, gate) -> WorkflowState:
+        paper = "\n\n".join(
+            [
+                "# 写作前证据门禁未通过",
+                "",
+                "当前运行尚不具备生成最终论文的证据条件，因此系统停止论文正文写作，避免编造模型结果。",
+                "",
+                state.notes[K_PREWRITING_GATE_REPORT],
+            ]
+        )
+        paper_path = write_text(state.workspace.paper_dir / "paper_draft.md", paper)
+        state.artifacts[A_PAPER] = paper_path
+        quality = evaluate_paper_quality(paper)
+        self._record_quality(state, quality)
+        quality_path = write_text(state.workspace.paper_dir / "paper_quality_report.md", state.notes[K_PAPER_QUALITY_REPORT])
+        state.artifacts[A_PAPER_QUALITY] = quality_path
+        state.notes[K_WRITING_MODE] = "prewriting_gate_blocked"
+        return state
+
+    def _record_quality(self, state: WorkflowState, quality) -> None:
+        state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
+        state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+        state.notes[K_PAPER_SOLUTION_SCORE] = str(quality.metrics.get("solution_score", quality.score))
+        state.notes[K_PAPER_EVIDENCE_SCORE] = str(quality.metrics.get("evidence_score", quality.score))
+        state.notes[K_PAPER_STRUCTURE_SCORE] = str(quality.metrics.get("structure_score", quality.score))
+        state.notes[K_PAPER_EXPORT_SCORE] = str(quality.metrics.get("export_score", quality.score))
 
     # ── section-by-section evidence-driven writing pipeline ────────────
     def _use_fast_writing(self) -> bool:
@@ -468,6 +514,9 @@ class WritingAgent(Agent):
             revised = state.llm.complete(instructions, correction)
         except Exception as exc:
             state.notes["writing_agent_regenerate_error"] = str(exc)
+            failure_kind = classify_llm_error(exc)
+            if failure_kind:
+                state.notes[K_LLM_FAILURE_KIND] = failure_kind
             return paper, False
         return revised, True
 
@@ -504,6 +553,9 @@ class WritingAgent(Agent):
             revised = state.llm.complete(instructions, refinement_input)
         except Exception as exc:
             state.notes["writing_agent_quality_refine_error"] = str(exc)
+            failure_kind = classify_llm_error(exc)
+            if failure_kind:
+                state.notes[K_LLM_FAILURE_KIND] = failure_kind
             return paper, False
         return clean_paper_text(revised), True
 
@@ -572,7 +624,10 @@ class WritingAgent(Agent):
         )
         try:
             paper = state.llm.complete(prompt1, paper)
-        except Exception:
+        except Exception as exc:
+            failure_kind = classify_llm_error(exc)
+            if failure_kind:
+                state.notes[K_LLM_FAILURE_KIND] = failure_kind
             return paper
 
         # Step 2: content consistency check
@@ -591,7 +646,10 @@ class WritingAgent(Agent):
         )
         try:
             return state.llm.complete(prompt2, paper)
-        except Exception:
+        except Exception as exc:
+            failure_kind = classify_llm_error(exc)
+            if failure_kind:
+                state.notes[K_LLM_FAILURE_KIND] = failure_kind
             return paper
 
     def _apply_polish(self, state: WorkflowState, paper: str, quality) -> tuple[str, object]:
@@ -609,12 +667,14 @@ class WritingAgent(Agent):
             paper_path = write_text(state.workspace.paper_dir / "paper_draft.md", paper)
             state.artifacts[A_PAPER] = paper_path
             quality = evaluate_paper_quality(paper)
-            state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
-            state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
+            self._record_quality(state, quality)
             quality_path = write_text(state.workspace.paper_dir / "paper_quality_report.md", state.notes[K_PAPER_QUALITY_REPORT])
             state.artifacts[A_PAPER_QUALITY] = quality_path
             state.notes["writing_agent_polished"] = "true"
         except Exception as exc:
             state.notes["writing_agent_polish_error"] = str(exc)
+            failure_kind = classify_llm_error(exc)
+            if failure_kind:
+                state.notes[K_LLM_FAILURE_KIND] = failure_kind
 
         return paper, quality

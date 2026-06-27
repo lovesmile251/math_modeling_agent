@@ -849,8 +849,10 @@ class CandidateModelAgent:
             (("assignment", "指派", "匹配"), "assignment_plan", "optimization"),
             (("scheduling", "schedule", "调度", "排程"), "scheduling_plan", "optimization"),
             (("knapsack", "背包"), "knapsack_01", "optimization"),
+            (("crop", "planting", "farmland", "acreage"), "crop_planting_plan", "optimization"),
             (("seasonal", "季节"), "seasonal_forecast", "forecast"),
             (("pca", "主成分"), "pca", "clustering"),
+            (("nipt", "bmi", "y chromosome", "gestational week"), "nipt_bmi_grouping", "statistics"),
         )
         for terms, model_id, task_type in explicit_hints:
             if any(term in text for term in terms):
@@ -882,8 +884,8 @@ class CandidateModelAgent:
             (("抽样检测", "信度", "次品率"), "quality_sampling_plan", "statistics"),
             (("干涉条纹", "红外光谱", "频谱"), "fft_frequency_analysis", "statistics"),
             (("定日镜", "测线", "重叠率"), "nonlinear_optimization", "optimization"),
-            (("农作物", "种植策略"), "integer_programming", "optimization"),
-            (("NIPT", "BMI", "胎儿异常"), "gradient_boosting", "classification"),
+            (("农作物", "种植策略", "地块", "亩产"), "crop_planting_plan", "optimization"),
+            (("NIPT", "BMI", "胎儿异常"), "nipt_bmi_grouping", "statistics"),
             (("人体姿态", "关键节点", "跳远成绩"), "gradient_boosting", "forecast"),
             (("矿井突水", "水流漫延"), "bernoulli_flow", "simulation"),
             (("CT系统", "成像"), "image_registration", "classification"),
@@ -1156,7 +1158,7 @@ class ModelSuitabilityAgent:
         HIGH_EXPLAIN = {
             "trend_forecast", "smoothing_forecast", "linear_regression", "ridge_regression",
             "entropy_weights", "topsis_rank", "ahp_weights", "grey_relation",
-            "correlation_analysis", "hypothesis_tests", "parameter_estimation",
+            "correlation_analysis", "hypothesis_tests", "parameter_estimation", "nipt_bmi_grouping",
             "resource_allocation", "knapsack_01", "assignment_plan",
             "kmeans_cluster", "hierarchical_cluster", "graph_shortest_paths",
             "graph_mst", "graph_centrality", "capacity_gap",

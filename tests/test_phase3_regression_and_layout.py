@@ -5,12 +5,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from agents.base import K_EXECUTION_STATUS, K_PREWRITING_GATE_STATUS, WorkflowState
+from agents.base import K_EXECUTION_STATUS, K_PREWRITING_GATE_STATUS, PhaseStatus, WorkflowPhase, WorkflowState
+from agents.model_selection_crew import ModelSelectionCrew
 from models.fitting.advanced import parameter_identification
+from models.optimization.planting import crop_planting_plan
+from models.statistics.nipt import nipt_bmi_grouping
 from models.statistics.sampling import quality_sampling_plan
 from tools.pdf_layout_check import check_pdf_render_layout
 from tools.real_case_regression import run_real_case_regression
-from tools.rework_router import build_rework_plan, recommend_rework_route, write_rework_plan
+from tools.rework_router import apply_rework_plan, build_rework_plan, recommend_rework_route, write_rework_plan
 from tools.exporters import export_pdf
 from tools.report_builder import Document, Paragraph
 
@@ -42,6 +45,25 @@ def test_rework_router_builds_executable_plan_file(temp_workspace):
     assert payload["can_auto_apply"] is True
 
 
+def test_rework_plan_application_marks_downstream_state(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes[K_EXECUTION_STATUS] = "failed"
+    state.artifacts["result_registry"] = temp_workspace.logs_dir / "result_registry.json"
+
+    plan = build_rework_plan(state)
+    result = apply_rework_plan(state, plan, clear_artifacts=True)
+
+    assert result.applied is True
+    assert result.rerun_from_phase == WorkflowPhase.CODE_PLAN
+    assert state.phase == WorkflowPhase.CODE_PLAN
+    assert state.get_phase_status(WorkflowPhase.CODE_PLAN) == PhaseStatus.NEEDS_REVISION
+    assert state.get_phase_status(WorkflowPhase.EXECUTION) == PhaseStatus.NEEDS_REVISION
+    assert "result_registry" in result.stale_artifacts
+    assert "result_registry" in result.removed_artifacts
+    assert "result_registry" not in state.artifacts
+    assert state.decisions[-1]["action"] == "apply_rework_plan"
+
+
 def test_rework_router_sends_prewriting_block_to_result_or_model_phase(temp_workspace):
     state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
     state.notes[K_EXECUTION_STATUS] = "success"
@@ -66,6 +88,27 @@ def test_pdf_render_layout_check_creates_screenshots(tmp_path):
     assert report.pages[0].screenshot.endswith(".png")
     assert Path(report.pages[0].screenshot).exists()
     assert report.pages[0].blank is False
+    assert report.screenshot_manifest == [report.pages[0].screenshot]
+    assert report.pages[0].content_bbox["x1"] > report.pages[0].content_bbox["x0"]
+    assert report.pages[0].content_margin_px > 0
+
+
+def test_pdf_render_layout_check_flags_edge_contact(tmp_path):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    pdf = tmp_path / "edge_contact.pdf"
+    c = canvas.Canvas(str(pdf), pagesize=A4)
+    c.setFont("Helvetica", 12)
+    c.drawString(1, A4[1] - 12, "text touches the edge")
+    c.rect(0, 0, 30, A4[1], fill=1, stroke=0)
+    c.save()
+
+    report = check_pdf_render_layout(pdf, tmp_path / "edge_screenshots")
+
+    assert report.pages_checked == 1
+    assert report.passed is False
+    assert any("boundary" in warning for warning in report.warnings)
 
 
 def test_quality_sampling_plan_outputs_accept_reject_thresholds():
@@ -91,6 +134,63 @@ def test_parameter_identification_reports_uncertainty_and_stability():
     assert {"std_error", "ci95_low", "ci95_high", "stability_indicator", "equation"}.issubset(result.columns)
     assert result["stability_indicator"].iloc[0] == 1
     assert "target[t+1]" in result["equation"].iloc[0]
+
+
+def test_nipt_bmi_grouping_outputs_group_timing_strategy():
+    df = pd.DataFrame(
+        {
+            "bmi": [23.5, 25.0, 27.8, 29.2, 30.5, 32.1, 34.0, 35.5],
+            "gestational_week": [11, 12, 12, 13, 13, 14, 15, 15],
+            "y_concentration": [0.032, 0.041, 0.044, 0.038, 0.046, 0.039, 0.043, 0.050],
+            "abnormal": [0, 0, 0, 0, 1, 0, 1, 0],
+        }
+    )
+
+    result = nipt_bmi_grouping(df)
+
+    assert not result.empty
+    assert {"bmi_group", "recommended_week", "threshold_reach_rate", "risk_level"}.issubset(result.columns)
+    assert (result["recommended_week"] >= 12).all()
+
+
+def test_model_selection_prefers_nipt_bmi_grouping_for_nipt_case():
+    problem = "NIPT BMI gestational week Y chromosome concentration fetal abnormal risk grouping"
+
+    result = ModelSelectionCrew().run(problem, [], [])
+
+    selected = [item.model_id for item in result.selected]
+    assert selected
+    assert selected[0] == "nipt_bmi_grouping"
+
+
+def test_crop_planting_plan_outputs_area_profit_strategy():
+    df = pd.DataFrame(
+        {
+            "crop": ["wheat", "corn", "soybean", "rice"],
+            "plot": ["A", "B", "C", "D"],
+            "area": [30, 25, 20, 18],
+            "yield_per_area": [1.2, 1.5, 0.9, 1.8],
+            "price": [2.4, 2.1, 3.0, 2.8],
+            "cost": [1.1, 1.3, 0.9, 1.7],
+            "demand": [40, 35, 18, 32],
+        }
+    )
+
+    result = crop_planting_plan(df)
+
+    assert not result.empty
+    assert {"allocated_area", "expected_profit", "demand_satisfaction_rate"}.issubset(result.columns)
+    assert (result["allocated_area"] >= 0).all()
+
+
+def test_model_selection_prefers_crop_planting_for_planting_case():
+    problem = "crop planting farmland acreage yield price cost demand optimization strategy"
+
+    result = ModelSelectionCrew().run(problem, [], [])
+
+    selected = [item.model_id for item in result.selected]
+    assert selected
+    assert selected[0] == "crop_planting_plan"
 
 
 def test_real_case_regression_runner_handles_missing_corpus_root(tmp_path):
@@ -193,5 +293,118 @@ def test_real_case_regression_runner_executes_tiny_quality_case(tmp_path):
     )
 
     assert summary["requested_cases"] == 1
+    assert summary["case_count"] == 1
+    assert summary["scores"][0]["candidate_hit"] is True
+
+
+def test_real_case_regression_runner_executes_tiny_nipt_case(tmp_path):
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    statement = corpus_root / "case-nipt.txt"
+    statement.write_text(
+        "NIPT BMI gestational week Y chromosome concentration fetal abnormal risk grouping.",
+        encoding="utf-8",
+    )
+    corpus_index = tmp_path / "corpus.json"
+    gold = tmp_path / "gold.json"
+    corpus_index.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "case-nipt",
+                    "year": 2025,
+                    "problem": "C",
+                    "title": "nipt bmi grouping",
+                    "statement_path": "case-nipt.txt",
+                    "attachment_paths": [],
+                    "statement_chars": 75,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    gold.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "case-nipt",
+                    "expected_task_types": ["statistics"],
+                    "acceptable_primary_models": ["nipt_bmi_grouping"],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = run_real_case_regression(
+        corpus_index_path=corpus_index,
+        gold_path=gold,
+        corpus_root=corpus_root,
+        output_dir=tmp_path / "out",
+        limit=20,
+        min_average_score=60.0,
+        min_primary_accuracy=0.0,
+        min_candidate_coverage=1.0,
+    )
+
+    assert summary["schema_version"] == "1.1"
+    assert summary["case_count"] == 1
+    assert summary["scores"][0]["candidate_hit"] is True
+
+
+def test_real_case_regression_runner_executes_tiny_planting_case(tmp_path):
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    statement = corpus_root / "case-planting.txt"
+    statement.write_text(
+        "crop planting farmland acreage yield price cost demand optimization strategy",
+        encoding="utf-8",
+    )
+    corpus_index = tmp_path / "corpus.json"
+    gold = tmp_path / "gold.json"
+    corpus_index.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "case-planting",
+                    "year": 2024,
+                    "problem": "C",
+                    "title": "crop planting",
+                    "statement_path": "case-planting.txt",
+                    "attachment_paths": [],
+                    "statement_chars": 70,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    gold.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "case-planting",
+                    "expected_task_types": ["optimization"],
+                    "acceptable_primary_models": ["crop_planting_plan"],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = run_real_case_regression(
+        corpus_index_path=corpus_index,
+        gold_path=gold,
+        corpus_root=corpus_root,
+        output_dir=tmp_path / "out",
+        limit=20,
+        min_average_score=60.0,
+        min_primary_accuracy=0.0,
+        min_candidate_coverage=1.0,
+    )
+
     assert summary["case_count"] == 1
     assert summary["scores"][0]["candidate_hit"] is True

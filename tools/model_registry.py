@@ -81,6 +81,10 @@ BASIC_MODEL_REGISTRY: dict[str, ModelEntry] = {
         "models.optimization.esp", "cement_esp_optimization",
         "{var} = cement_esp_optimization(df)", "cement_esp_optimization",
     ),
+    "crop_planting_plan": (
+        "models.optimization.planting", "crop_planting_plan",
+        "{var} = crop_planting_plan(df)", "crop_planting_plan",
+    ),
     # statistics
     "correlation_analysis": (
         "models.statistics.correlation", "correlation_analysis",
@@ -105,6 +109,10 @@ BASIC_MODEL_REGISTRY: dict[str, ModelEntry] = {
     "quality_sampling_plan": (
         "models.statistics.sampling", "quality_sampling_plan",
         "{var} = quality_sampling_plan(df)", "quality_sampling_plan",
+    ),
+    "nipt_bmi_grouping": (
+        "models.statistics.nipt", "nipt_bmi_grouping",
+        "{var} = nipt_bmi_grouping(df)", "nipt_bmi_grouping",
     ),
     # fitting
     "polynomial_fit": (

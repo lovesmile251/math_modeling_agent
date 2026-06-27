@@ -5,7 +5,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from agents.base import K_EXECUTION_STATUS, K_PAPER_QUALITY_SCORE, K_PREWRITING_GATE_STATUS, WorkflowPhase, WorkflowState
+from agents.base import (
+    K_EXECUTION_STATUS,
+    K_PAPER_QUALITY_SCORE,
+    K_PREWRITING_GATE_STATUS,
+    PhaseStatus,
+    WorkflowPhase,
+    WorkflowState,
+)
 from tools.file_tool import write_text
 
 
@@ -39,6 +46,26 @@ class ReworkPlan:
             "actions": list(self.actions),
             "refresh_artifacts": list(self.refresh_artifacts),
             "can_auto_apply": self.can_auto_apply,
+        }
+
+
+@dataclass(frozen=True)
+class ReworkApplyResult:
+    applied: bool
+    rerun_from_phase: WorkflowPhase | None
+    invalidated_phases: tuple[WorkflowPhase, ...]
+    stale_artifacts: tuple[str, ...]
+    removed_artifacts: tuple[str, ...]
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "applied": self.applied,
+            "rerun_from_phase": self.rerun_from_phase.value if self.rerun_from_phase else None,
+            "invalidated_phases": [phase.value for phase in self.invalidated_phases],
+            "stale_artifacts": list(self.stale_artifacts),
+            "removed_artifacts": list(self.removed_artifacts),
+            "reason": self.reason,
         }
 
 
@@ -123,6 +150,58 @@ def write_rework_plan(workspace: Any, plan: ReworkPlan) -> Path:
     return write_text(
         logs_dir / "auto_rework_plan.json",
         json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+    )
+
+
+def apply_rework_plan(
+    state: WorkflowState,
+    plan: ReworkPlan | None = None,
+    *,
+    clear_artifacts: bool = False,
+    operator: str = "system",
+) -> ReworkApplyResult:
+    """Apply a rework plan to workflow state without running agents.
+
+    This prepares the state for a rerun by marking downstream phases as
+    ``needs_revision`` and recording a decision. Artifact files are not deleted;
+    optionally their state mappings can be removed so downstream agents refresh
+    them.
+    """
+
+    resolved = plan or build_rework_plan(state)
+    if resolved is None:
+        return ReworkApplyResult(False, None, (), (), (), "no rework plan available")
+
+    for phase in resolved.invalidated_phases:
+        state.set_phase_status(phase, PhaseStatus.NEEDS_REVISION)
+    state.phase = resolved.rerun_from_phase
+    removed: list[str] = []
+    stale = tuple(name for name in resolved.refresh_artifacts if name in state.artifacts)
+    if clear_artifacts:
+        for artifact_name in resolved.refresh_artifacts:
+            if artifact_name in state.artifacts:
+                state.artifacts.pop(artifact_name, None)
+                removed.append(artifact_name)
+
+    state.notes["auto_rework_applied"] = "true"
+    state.notes["auto_rework_rerun_from_phase"] = resolved.rerun_from_phase.value
+    state.notes["auto_rework_invalidated_phases"] = ",".join(
+        phase.value for phase in resolved.invalidated_phases
+    )
+    state.notes["auto_rework_stale_artifacts"] = ",".join(stale)
+    state.record_decision(
+        resolved.rerun_from_phase,
+        "apply_rework_plan",
+        operator=operator,
+        notes=resolved.route.reason,
+    )
+    return ReworkApplyResult(
+        True,
+        resolved.rerun_from_phase,
+        resolved.invalidated_phases,
+        stale,
+        tuple(removed),
+        resolved.route.reason,
     )
 
 

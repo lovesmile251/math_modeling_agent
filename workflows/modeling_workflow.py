@@ -44,7 +44,7 @@ from tools.file_tool import discover_data_files, list_data_files, read_problem_f
 from tools.llm_client import build_llm_client
 from tools.model_ids import normalize_model_ids
 from tools.logging_setup import setup_logging
-from tools.rework_router import build_rework_plan, write_rework_plan
+from tools.rework_router import ReworkPlan, ReworkRoute, apply_rework_plan, build_rework_plan, write_rework_plan
 
 
 # ── phases that pause for user confirmation ──
@@ -389,20 +389,33 @@ class ModelingWorkflow:
         if self._state is None:
             raise RuntimeError("No workflow state to rerun.")
         state = self._state
-        log = logging.getLogger("mma.workflow")
-
-        # invalidate the target phase
-        state.set_phase_status(phase, PhaseStatus.NEEDS_REVISION)
-        state.record_decision(phase, "rerun", operator="system", notes=f"Rerun from {phase.value}")
-
-        # cascade invalidation to downstream
-        downstream = _INVALIDATION_MAP.get(phase, [])
-        for down_phase in downstream:
-            state.set_phase_status(down_phase, PhaseStatus.NEEDS_REVISION)
-            log.info("Invalidated downstream phase: %s", down_phase.value)
+        plan = ReworkPlan(
+            route=ReworkRoute(phase, f"manual rerun from {phase.value}", severity="medium"),
+            rerun_from_phase=phase,
+            invalidated_phases=tuple(
+                item
+                for item in WorkflowPhase
+                if phase.order <= item.order < WorkflowPhase.COMPLETE.order
+            ),
+            actions=(f"rerun workflow from {phase.value}",),
+            refresh_artifacts=(),
+            can_auto_apply=True,
+        )
+        apply_rework_plan(state, plan, operator="system")
 
         self._paused_at = None
         return self.run_until(WorkflowPhase.COMPLETE, auto_approve=False)
+
+    def prepare_auto_rework(self, *, clear_artifacts: bool = False) -> WorkflowState:
+        """Apply the current auto rework plan without executing downstream agents."""
+        if self._state is None:
+            raise RuntimeError("No workflow state to prepare for rework.")
+        plan = build_rework_plan(self._state)
+        if plan is not None:
+            apply_rework_plan(self._state, plan, clear_artifacts=clear_artifacts, operator="auto")
+            write_rework_plan(self.workspace, plan)
+            self._save_pause_state(self._state)
+        return self._state
 
     def revise_artifact(self, artifact_name: str, feedback: str) -> WorkflowState:
         """Locally revise a single artifact based on feedback.

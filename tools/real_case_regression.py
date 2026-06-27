@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tools.competition_corpus import load_corpus_index
 from tools.file_tool import write_text
 from tools.real_case_benchmark import evaluate_real_case, load_real_case_gold
-from tools.competition_corpus import load_corpus_index
 
 
 def run_real_case_regression(
@@ -18,6 +18,8 @@ def run_real_case_regression(
     *,
     limit: int = 20,
     min_average_score: float = 70.0,
+    min_average_task_f1: float = 0.70,
+    min_primary_accuracy: float = 0.25,
     min_candidate_coverage: float = 0.60,
 ) -> dict[str, Any]:
     cases = {case.case_id: case for case in load_corpus_index(corpus_index_path)}
@@ -33,18 +35,36 @@ def run_real_case_regression(
         scores.append(evaluate_real_case(gold, case, corpus_root))
 
     average_score = round(sum(score.total for score in scores) / max(len(scores), 1), 2)
+    average_task_f1 = round(sum(score.task_f1 for score in scores) / max(len(scores), 1), 4)
+    primary_accuracy = round(sum(score.primary_hit for score in scores) / max(len(scores), 1), 4)
     candidate_coverage = round(sum(score.candidate_hit for score in scores) / max(len(scores), 1), 4)
-    passed = bool(scores) and average_score >= min_average_score and candidate_coverage >= min_candidate_coverage
+    failures = [
+        _failure_reason(score)
+        for score in scores
+        if score.total < min_average_score or not score.candidate_hit
+    ]
+    passed = (
+        bool(scores)
+        and average_score >= min_average_score
+        and average_task_f1 >= min_average_task_f1
+        and primary_accuracy >= min_primary_accuracy
+        and candidate_coverage >= min_candidate_coverage
+    )
     summary = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "requested_cases": len(gold_cases),
         "case_count": len(scores),
         "skipped_count": len(skipped),
         "average_score": average_score,
+        "average_task_f1": average_task_f1,
+        "primary_model_accuracy": primary_accuracy,
         "candidate_model_coverage": candidate_coverage,
         "min_average_score": min_average_score,
+        "min_average_task_f1": min_average_task_f1,
+        "min_primary_accuracy": min_primary_accuracy,
         "min_candidate_coverage": min_candidate_coverage,
         "passed": passed,
+        "failures": failures,
         "scores": [score.to_dict() for score in scores],
         "skipped": skipped,
     }
@@ -56,30 +76,53 @@ def run_real_case_regression(
 
 def _format_report(summary: dict[str, Any]) -> str:
     lines = [
-        "# 第三阶段真实题 Regression",
+        "# Stage 3 Real Case Regression",
         "",
-        f"- 请求题数：{summary['requested_cases']}",
-        f"- 实跑题数：{summary['case_count']}",
-        f"- 跳过题数：{summary['skipped_count']}",
-        f"- 平均分：{summary['average_score']}",
-        f"- 候选覆盖率：{summary['candidate_model_coverage']}",
-        f"- 结论：{'通过' if summary['passed'] else '未通过'}",
+        f"- requested_cases: {summary['requested_cases']}",
+        f"- executed_cases: {summary['case_count']}",
+        f"- skipped_cases: {summary['skipped_count']}",
+        f"- average_score: {summary['average_score']}",
+        f"- average_task_f1: {summary['average_task_f1']}",
+        f"- primary_model_accuracy: {summary['primary_model_accuracy']}",
+        f"- candidate_model_coverage: {summary['candidate_model_coverage']}",
+        f"- passed: {summary['passed']}",
         "",
-        "## 分题",
+        "## Cases",
         "",
-        "| case_id | score | candidate_hit | selected_models |",
-        "|---|---:|:---:|---|",
+        "| case_id | score | task_f1 | primary_hit | candidate_hit | selected_models |",
+        "|---|---:|---:|:---:|:---:|---|",
     ]
     for item in summary["scores"]:
         lines.append(
             f"| {item['case_id']} | {item['total']:.2f} | "
-            f"{'是' if item['candidate_hit'] else '否'} | "
+            f"{item['task_f1']:.3f} | "
+            f"{'yes' if item['primary_hit'] else 'no'} | "
+            f"{'yes' if item['candidate_hit'] else 'no'} | "
             f"{', '.join(item['selected_models'][:5])} |"
         )
     if summary["skipped"]:
-        lines.extend(["", "## 跳过", ""])
+        lines.extend(["", "## Skipped", ""])
         lines.extend(f"- {item['case_id']}: {item['reason']}" for item in summary["skipped"])
+    if summary["failures"]:
+        lines.extend(["", "## Failures", ""])
+        lines.extend(f"- {item['case_id']}: {item['reason']}" for item in summary["failures"])
     return "\n".join(lines)
+
+
+def _failure_reason(score: Any) -> dict[str, Any]:
+    reasons: list[str] = []
+    if score.task_f1 < 1.0:
+        reasons.append(f"task_f1={score.task_f1}")
+    if not score.primary_hit:
+        reasons.append("primary model missed")
+    if not score.candidate_hit:
+        reasons.append("top-5 candidate missed")
+    return {
+        "case_id": score.case_id,
+        "reason": "; ".join(reasons) or f"score={score.total}",
+        "selected_models": list(score.selected_models[:5]),
+        "expected_tasks": list(score.expected_tasks),
+    }
 
 
 def main() -> None:

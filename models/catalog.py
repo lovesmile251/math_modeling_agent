@@ -128,12 +128,14 @@ EXECUTABLE_MODEL_LABELS = {
     "bin_packing": "装箱优化",
     "scheduling_plan": "调度排程优化",
     "cement_esp_optimization": "水泥窑 ESP 电除尘运行优化",
+    "crop_planting_plan": "农作物种植面积与收益优化",
     "correlation_analysis": "Pearson/Spearman 相关性分析",
     "linear_regression": "线性回归分析",
     "parameter_estimation": "参数估计",
     "hypothesis_tests": "假设检验",
     "anova_analysis": "方差分析 ANOVA",
     "quality_sampling_plan": "质量抽检与次品率判定方案",
+    "nipt_bmi_grouping": "NIPT BMI 分组与检测时点优化",
     "polynomial_fit": "多项式曲线拟合",
     "pca": "主成分分析 PCA",
     "feature_selection": "特征选择",
@@ -403,6 +405,7 @@ MODEL_APPLICABILITY: dict[str, ApplicabilityRule] = {
     "capacity_gap": ApplicabilityRule(("evaluation", "optimization"), min_rows=1, min_numeric_cols=2, needs_demand=True, needs_capacity=True, role="primary", tier="baseline", validation="match demand and capacity fields", not_recommended_when=("no paired demand-capacity columns", "data is purely qualitative"), innovation_extensions=("dynamic_capacity_planning", "stochastic_gap_analysis")),
     # Optimization
     "resource_allocation": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, needs_objective_or_constraint=True, role="primary", tier="baseline", validation="check objective and constraints", not_recommended_when=("problem is nonlinear", "integer decisions required"), innovation_extensions=("robust_optimization", "stochastic_programming")),
+    "crop_planting_plan": ApplicabilityRule(("optimization", "evaluation"), min_rows=2, min_numeric_cols=2, role="primary", tier="improved", validation="check land, demand, yield, price, and cost sensitivity", not_recommended_when=("crop rotation constraints dominate", "multi-year stochastic policy required"), innovation_extensions=("multi_year_rotation", "robust_crop_mix")),
     "knapsack_01": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, needs_objective_or_constraint=True, role="comparison", tier="baseline", validation="check capacity feasibility", not_recommended_when=("continuous decisions", "multiple knapsacks with coupling"), innovation_extensions=("multi_knapsack", "branch_and_price")),
     "assignment_plan": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, role="comparison", tier="baseline", validation="check one-to-one assignment constraints", not_recommended_when=("many-to-many assignment", "dynamic reassignment needed"), innovation_extensions=("generalized_assignment", "stable_marriage")),
     "bin_packing": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=1, needs_capacity=True, role="comparison", tier="baseline", validation="check bin capacity", not_recommended_when=("items are splittable", "online packing scenario"), innovation_extensions=("column_generation", "heuristic_meta")),
@@ -442,6 +445,7 @@ MODEL_APPLICABILITY: dict[str, ApplicabilityRule] = {
     "hypothesis_tests": ApplicabilityRule(("statistics",), min_rows=4, min_numeric_cols=1, role="validation", tier="baseline", validation="report p-value and effect size", not_recommended_when=("multiple testing without correction", "distribution assumptions violated"), innovation_extensions=("permutation_test", "bootstrap_test")),
     "anova_analysis": ApplicabilityRule(("statistics",), min_rows=4, min_numeric_cols=1, min_categorical_cols=1, role="validation", tier="improved", validation="check group sizes", not_recommended_when=("groups are unbalanced and small", "normality assumption violated"), innovation_extensions=("welch_anova", "kruskal_wallis")),
     "quality_sampling_plan": ApplicabilityRule(("statistics", "evaluation"), min_rows=1, min_numeric_cols=1, role="primary", tier="improved", validation="check binomial confidence level and accept/reject thresholds", not_recommended_when=("defects are not Bernoulli trials", "sampling is destructive with variable cost per item"), innovation_extensions=("sequential_sampling", "bayesian_acceptance_sampling")),
+    "nipt_bmi_grouping": ApplicabilityRule(("statistics", "optimization", "classification"), min_rows=3, min_numeric_cols=1, role="primary", tier="improved", validation="check BMI group stability and Y-concentration threshold reach rate", not_recommended_when=("BMI field is missing", "gestational week and Y concentration are both missing"), innovation_extensions=("survival_time_to_threshold", "risk_constrained_grouping")),
     "monte_carlo": ApplicabilityRule(("statistics", "simulation"), min_rows=1, min_numeric_cols=1, role="comparison", tier="improved", validation="check random seed sensitivity", not_recommended_when=("analytic solution is tractable", "computational budget too low"), innovation_extensions=("latin_hypercube", "importance_sampling")),
 }
 

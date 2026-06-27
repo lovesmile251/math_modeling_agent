@@ -53,6 +53,9 @@ def _build_model_mapping():
     from models.optimization.esp import cement_esp_optimization
     mapping["cement_esp_optimization"] = (cement_esp_optimization, False, False, False)
 
+    from models.optimization.planting import crop_planting_plan
+    mapping["crop_planting_plan"] = (crop_planting_plan, False, False, False)
+
     from models.optimization.advanced import (
         astar_path_plan,
         integer_branch_bound,
@@ -134,6 +137,9 @@ def _build_model_mapping():
 
     from models.statistics.sampling import quality_sampling_plan
     mapping["quality_sampling_plan"] = (quality_sampling_plan, False, False, False)
+
+    from models.statistics.nipt import nipt_bmi_grouping
+    mapping["nipt_bmi_grouping"] = (nipt_bmi_grouping, False, False, False)
 
     from models.statistics.monte_carlo import monte_carlo_simulation
     mapping["monte_carlo"] = (monte_carlo_simulation, False, False, False)
@@ -311,6 +317,17 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
             "P_total_kW": rng.normal(1770, 70, rows),
         })
 
+    if model_id == "crop_planting_plan":
+        return pd.DataFrame({
+            "crop": ["wheat", "corn", "soybean", "rice"],
+            "plot": ["A", "B", "C", "D"],
+            "area": [30, 25, 20, 18],
+            "yield_per_area": [1.2, 1.5, 0.9, 1.8],
+            "price": [2.4, 2.1, 3.0, 2.8],
+            "cost": [1.1, 1.3, 0.9, 1.7],
+            "demand": [40, 35, 18, 32],
+        })
+
     if model_id in ("var_cvar_risk", "garch_volatility", "black_scholes_pricing",
                     "markowitz_portfolio"):
         return pd.DataFrame({
@@ -417,6 +434,14 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
             "sample_count": [100, 120, 80],
             "defect_count": [8, 11, 7],
             "defect_rate": [0.08, 0.0917, 0.0875],
+        })
+
+    if model_id == "nipt_bmi_grouping":
+        return pd.DataFrame({
+            "bmi": [23.5, 25.0, 27.8, 29.2, 30.5, 32.1, 34.0, 35.5],
+            "gestational_week": [11, 12, 12, 13, 13, 14, 15, 15],
+            "y_concentration": [0.032, 0.041, 0.044, 0.038, 0.046, 0.039, 0.043, 0.050],
+            "abnormal": [0, 0, 0, 0, 1, 0, 1, 0],
         })
 
     if model_id in ("fft_frequency_analysis", "signal_denoising", "energy_detection"):

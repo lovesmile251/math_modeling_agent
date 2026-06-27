@@ -29,6 +29,12 @@ MODEL_ID_ALIASES: dict[str, str] = {
     "cement_esp": "cement_esp_optimization",
     "electrostatic_precipitator": "cement_esp_optimization",
     "electrostatic_precipitator_optimization": "cement_esp_optimization",
+    "nipt": "nipt_bmi_grouping",
+    "bmi_grouping": "nipt_bmi_grouping",
+    "nipt_grouping": "nipt_bmi_grouping",
+    "crop_planting": "crop_planting_plan",
+    "planting_plan": "crop_planting_plan",
+    "farmland_plan": "crop_planting_plan",
 }
 
 

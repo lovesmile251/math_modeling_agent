@@ -178,6 +178,10 @@ class AnalysisAgent(Agent):
     def _diagnostics_lines(self, model_outputs: dict) -> list[str]:
         lines: list[str] = []
 
+        esp_rows = self._read_rows(model_outputs.get("esp_optimization"))
+        if esp_rows:
+            lines.extend(self._esp_optimization_lines(esp_rows))
+
         error_rows = self._read_rows(model_outputs.get("error_analysis"))
         if error_rows:
             metrics = self._error_metrics(error_rows)
@@ -216,6 +220,39 @@ class AnalysisAgent(Agent):
                     + f"（CV-RMSE={self._fmt(best.get('cv_rmse'))}，"
                     + f"CV-R²={self._fmt(best.get('cv_r_squared'))}）。"
                 )
+        return lines
+
+    def _esp_optimization_lines(self, rows: list[dict]) -> list[str]:
+        lines: list[str] = []
+        summary = next((row for row in rows if row.get("section") == "standard_tightening_summary"), None)
+        if summary:
+            lines.append(
+                "- ESP optimization: "
+                + f"tightening {self._fmt(summary.get('baseline_standard_mgNm3'))}mg to {self._fmt(summary.get('standard_mgNm3'))}mg "
+                + f"raises average power by {self._fmt(summary.get('energy_increment_pct'))}% "
+                + f"({self._fmt(summary.get('baseline_P_total_kW'))} -> {self._fmt(summary.get('predicted_P_total_kW'))} kW)."
+            )
+
+        optima = [row for row in rows if row.get("section") == "typical_condition_optimum"]
+        for row in optima[:6]:
+            lines.append(
+                "- ESP optimum "
+                + f"{row.get('condition', '')} @ {self._fmt(row.get('standard_mgNm3'))}mg: "
+                + f"U=({self._fmt(row.get('U1_kV'))}, {self._fmt(row.get('U2_kV'))}, "
+                + f"{self._fmt(row.get('U3_kV'))}, {self._fmt(row.get('U4_kV'))}) kV, "
+                + f"T=({self._fmt(row.get('T1_s'))}, {self._fmt(row.get('T2_s'))}, "
+                + f"{self._fmt(row.get('T3_s'))}, {self._fmt(row.get('T4_s'))}) s, "
+                + f"P={self._fmt(row.get('predicted_P_total_kW'))} kW, "
+                + f"Cout={self._fmt(row.get('predicted_C_out_mgNm3'))} mg/Nm3."
+            )
+
+        strategies = [row for row in rows if row.get("section") == "differential_strategy"]
+        if strategies:
+            labels = [
+                f"{row.get('condition', '')}: {row.get('priority_rule', '')}"
+                for row in strategies[:2]
+            ]
+            lines.append("- ESP differential strategies: " + " | ".join(labels))
         return lines
 
     def _error_metrics(self, rows: list[dict]) -> dict:
@@ -263,6 +300,7 @@ class AnalysisAgent(Agent):
 
     def _label_model_output(self, name: str) -> str:
         extra_labels = {
+            "esp_optimization": "ESP operating optimization",
             "capacity_gap": "需求容量缺口分析",
             "community_detection": "社群发现",
             "top5_communities": "5 大高密度社群",

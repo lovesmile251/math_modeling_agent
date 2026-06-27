@@ -55,6 +55,28 @@ AWARD_ABSTRACT_MAX_CHARS = 800
 AWARD_MIN_KEYWORDS = 3
 AWARD_MAX_KEYWORDS = 5
 
+SUBMISSION_BLOCKER_PATTERNS = (
+    r"待补充",
+    r"待完善",
+    r"待确定",
+    r"未产出优化数值解",
+    r"未产出.*数值解",
+    r"未得到.*数值解",
+    r"后续计算",
+    r"后续可补充",
+    r"后续补充",
+    r"后续完善",
+    r"\bTODO\b",
+)
+
+SEVERE_ISSUE_MARKERS = (
+    "Submission blocker",
+    "Core result table missing",
+    "Reference citations without matching entries",
+    "Reference entries not cited in body",
+    "Reference section is missing",
+)
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -137,14 +159,25 @@ def evaluate_paper_quality(
         "chars": len(re.sub(r"\s+", "", text)),
         "equations": len(re.findall(r"\\\(|\\\[|\$\$", text)),
         "tables": len(re.findall(r"^\s*\|.+\|\s*$", text, flags=re.MULTILINE)),
+        "result_tables": _count_markdown_table_rows(_extract_section(text, "结果")),
         "figures": len(re.findall(r"!\[.*?\]\(.*?\)", text)),
         "digits": len(re.findall(r"\d", text)),
         "problem_sections": len(re.findall(r"问题[一二三四五六七八九十\d]", text)),
         "references": len(re.findall(r"\[\d+\]", text)),
+        "keywords": 0,
     }
 
     # ── structural checks ──
     _check_structure(text, issues, suggestions, metrics)
+
+    blocker_issues, blocker_suggestions = check_submission_readiness(text)
+    issues.extend(blocker_issues)
+    suggestions.extend(blocker_suggestions)
+
+    keyword_issues, keyword_suggestions, keyword_count = check_keywords(text)
+    metrics["keywords"] = keyword_count
+    issues.extend(keyword_issues)
+    suggestions.extend(keyword_suggestions)
 
     # ── LaTeX integrity (#6) ──
     latex_issues = check_latex_integrity(text)
@@ -189,7 +222,9 @@ def format_quality_report(report: PaperQualityReport) -> str:
         f"- 正文字数估计：{report.metrics['chars']}",
         f"- 公式标记数：{report.metrics['equations']}",
         f"- Markdown 表格行数：{report.metrics['tables']}",
+        f"- 结果章节表格行数：{report.metrics.get('result_tables', 0)}",
         f"- 图片引用数：{report.metrics['figures']}",
+        f"- 关键词数量：{report.metrics.get('keywords', 0)}",
         f"- 参考文献标记数：{report.metrics.get('references', 0)}",
         "",
         "### 质量问题",
@@ -348,6 +383,52 @@ def check_references(text: str) -> tuple[list[str], list[str]]:
     return issues, suggestions
 
 
+def check_submission_readiness(text: str) -> tuple[list[str], list[str]]:
+    """Reject phrases that indicate the paper is not submit-ready."""
+    issues: list[str] = []
+    suggestions: list[str] = []
+
+    offenders: list[str] = []
+    for pattern in SUBMISSION_BLOCKER_PATTERNS:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE | re.DOTALL):
+            snippet = re.sub(r"\s+", " ", match.group(0)).strip()
+            if snippet:
+                offenders.append(snippet[:60])
+
+    if offenders:
+        unique = _dedupe(offenders)
+        issues.append(
+            "Submission blocker phrases remain in paper: "
+            + ", ".join(unique[:8])
+        )
+        suggestions.append(
+            "Remove non-submit-ready wording and rewrite unsupported claims as completed, evidence-bounded conclusions."
+        )
+
+    return issues, suggestions
+
+
+def check_keywords(text: str) -> tuple[list[str], list[str], int]:
+    """Validate the keyword section and return (issues, suggestions, count)."""
+    keyword_text = _extract_keywords_text(text)
+    keywords = _split_keywords(keyword_text)
+    count = len(keywords)
+
+    issues: list[str] = []
+    suggestions: list[str] = []
+    if count == 0:
+        issues.append("缺少关键词或关键词无法解析。")
+        suggestions.append("补充 3-5 个关键词，并用分号、逗号或顿号分隔。")
+    elif count < AWARD_MIN_KEYWORDS:
+        issues.append(f"关键词数量（{count}）偏少，要求 3-5 个。")
+        suggestions.append("补充能够覆盖模型、方法和应用场景的关键词。")
+    elif count > AWARD_MAX_KEYWORDS:
+        issues.append(f"关键词数量（{count}）偏多，要求 3-5 个。")
+        suggestions.append("合并或删除泛化关键词，保留 3-5 个核心关键词。")
+
+    return issues, suggestions, count
+
+
 def check_traceability(
     text: str,
     workspace_root: Path | None = None,
@@ -363,19 +444,25 @@ def check_traceability(
 
     declared_refs = _declared_reference_numbers(text)
     cited_refs = _inline_reference_numbers(text)
-    if declared_refs:
-        missing_entries = sorted(cited_refs - declared_refs)
-        uncited_entries = sorted(declared_refs - cited_refs)
-        if missing_entries:
-            issues.append(
-                "Reference citations without matching entries: "
-                + ", ".join(f"[{number}]" for number in missing_entries[:10])
-            )
-        if uncited_entries:
-            suggestions.append(
-                "Reference entries not cited in body: "
-                + ", ".join(f"[{number}]" for number in uncited_entries[:10])
-            )
+    if cited_refs and not declared_refs:
+        issues.append(
+            "Reference section is missing for body citations: "
+            + ", ".join(f"[{number}]" for number in sorted(cited_refs)[:10])
+        )
+    missing_entries = sorted(cited_refs - declared_refs)
+    uncited_entries = sorted(declared_refs - cited_refs)
+    if missing_entries:
+        issues.append(
+            "Reference citations without matching entries: "
+            + ", ".join(f"[{number}]" for number in missing_entries[:10])
+        )
+    if uncited_entries:
+        message = (
+            "Reference entries not cited in body: "
+            + ", ".join(f"[{number}]" for number in uncited_entries[:10])
+        )
+        issues.append(message)
+        suggestions.append(message)
 
     if workspace_root:
         table_suffixes = _generated_table_suffixes(workspace_root)
@@ -435,19 +522,6 @@ def _check_via_parse(text: str) -> tuple[list[str], list[str]]:
             )
             break  # One warning is enough
 
-    # Check abstract keyword count
-    abstract = _extract_section(text, "摘要")
-    keywords_section = _extract_section(text, "关键词")
-    keyword_text = keywords_section or abstract
-    keywords = re.findall(r"[；;]\s*|\n", keyword_text)
-    kw_count = max(1, len(keywords)) if keyword_text else 0
-
-    if abstract and (kw_count < AWARD_MIN_KEYWORDS or kw_count > AWARD_MAX_KEYWORDS):
-        if kw_count < AWARD_MIN_KEYWORDS:
-            suggestions.append(f"关键词数量（{kw_count}）偏少，建议 3-5 个。")
-        elif kw_count > AWARD_MAX_KEYWORDS:
-            suggestions.append(f"关键词数量（{kw_count}）偏多，建议不超过 5 个。")
-
     return issues, suggestions
 
 
@@ -472,13 +546,33 @@ def _compute_score(issues: list[str], metrics: dict) -> int:
     """
     score = 100
 
-    # Hard issues: -8 each, floor at 45 (max -55)
+    # Hard issues: -8 each, with extra weight for submit blockers.
     # Only count structural/LaTeX/reference issues, not "suggestions-only"
     hard_issues = [
         i for i in issues
-        if any(kw in i for kw in ("缺少", "不匹配", "不存在", "不足", "偏短", "偏少"))
+        if any(
+            kw in i
+            for kw in (
+                "缺少",
+                "不匹配",
+                "不存在",
+                "不足",
+                "偏短",
+                "偏少",
+                "偏多",
+                "Submission blocker",
+                "Reference citations",
+                "Reference entries",
+                "Reference section",
+                "Core result table",
+                "Model claims without",
+            )
+        )
     ]
-    score -= min(55, len(hard_issues) * 8)
+    severe_issues = [
+        i for i in issues if any(marker in i for marker in SEVERE_ISSUE_MARKERS)
+    ]
+    score -= min(70, len(hard_issues) * 8 + len(severe_issues) * 10)
 
     # Soft warnings (below award median but not hard-fail)
     if metrics["equations"] > 0 and metrics["equations"] < AWARD_MEDIAN_EQUATIONS:
@@ -539,6 +633,9 @@ def _check_structure(
     if metrics["tables"] < 6:
         issues.append("结果表或符号表不足，证据密度偏低。")
         suggestions.append("正文保留符号说明表、核心结果表、对比表或参数表。")
+    if metrics.get("result_tables", 0) == 0:
+        issues.append("Core result table missing: no Markdown table is present in the result section.")
+        suggestions.append("Add at least one core task/result table before treating the paper as submit-ready.")
     if metrics["figures"] < 2:
         issues.append("正文图表引用偏少。")
         suggestions.append("至少引用关键图表，并紧跟解释。")
@@ -573,6 +670,35 @@ def _extract_section(text: str, section_name: str) -> str:
     next_heading = re.search(r"^#+\s+", text[start:], flags=re.MULTILINE)
     end = start + next_heading.start() if next_heading else len(text)
     return text[start:end].strip()
+
+
+def _count_markdown_table_rows(text: str) -> int:
+    return len(re.findall(r"^\s*\|.+\|\s*$", text, flags=re.MULTILINE))
+
+
+def _extract_keywords_text(text: str) -> str:
+    section = _extract_section(text, "关键词")
+    if section:
+        return section
+
+    inline = re.search(r"关键词\s*[:：]\s*(.+)", text)
+    if inline:
+        return inline.group(1).strip()
+    return ""
+
+
+def _split_keywords(keyword_text: str) -> list[str]:
+    if not keyword_text:
+        return []
+
+    cleaned = re.sub(r"^\s*[-*]\s*", "", keyword_text.strip())
+    cleaned = re.sub(r"^关键词\s*[:：]\s*", "", cleaned)
+    parts = re.split(r"[；;，,、\n]+", cleaned)
+    return [
+        part.strip().strip("。.;；,，")
+        for part in parts
+        if part.strip().strip("。.;；,，")
+    ]
 
 
 def _declared_reference_numbers(text: str) -> set[int]:

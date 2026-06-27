@@ -63,6 +63,8 @@ PROJECT_ROOT = Path({project_root!r})
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from models.optimization.esp import esp_operating_optimization, is_esp_operating_frame
+
 '''
 
 # ── utility functions (shared by all generated scripts) ──
@@ -521,6 +523,9 @@ def run_all_models(df: pd.DataFrame, stem: str) -> list[dict]:
             continue
         results.append(run_model_safely(model_id, builder, df, stem, table_suffix))
 
+    if is_esp_operating_frame(df):
+        results.append(run_model_safely("esp_optimization", esp_operating_optimization, df, stem, "esp_optimization"))
+
     return results
 
 '''
@@ -769,6 +774,7 @@ def _build_known_suffixes(selected_models: list[str]) -> set[str]:
         "analysis_readiness_checklist",
         "categorical_frequency",
         "pair_frequency",
+        "esp_optimization",
     }
     for mid in selected_models:
         entry = BASIC_MODEL_REGISTRY.get(mid)

@@ -85,6 +85,17 @@ def evaluate_pre_writing_gate(state: WorkflowState) -> PreWritingGateReport:
             issues.append("题目或模型选择包含优化任务，但未发现优化结果表。")
             suggestions.append("先运行优化求解器，输出目标函数值、决策变量和约束满足情况。")
 
+    for deliverable in getattr(state, "task_deliverable_specs", []) or []:
+        missing = _missing_deliverable_tables(deliverable, table_files)
+        if missing:
+            issues.append(
+                f"{deliverable.task_id} 交付物缺少结果表证据：{', '.join(missing)}。"
+            )
+            suggestions.append(
+                f"按 TaskDeliverableSpec 为 {deliverable.task_id} 补齐："
+                + "；".join(deliverable.evidence_requirements[:3])
+            )
+
     metrics: dict[str, int | str] = {
         "tables": len(table_files),
         "figures": len(figure_files),
@@ -164,3 +175,23 @@ def _count_model_outputs(summary_path: Path) -> int:
                 and run.get("table")
             )
     return count
+
+
+def _missing_deliverable_tables(deliverable, table_files: list[Path]) -> list[str]:
+    if not deliverable.required_tables:
+        return []
+    table_names = [path.stem.lower() for path in table_files]
+    missing: list[str] = []
+    for expected in deliverable.required_tables:
+        token = str(expected).lower()
+        if token in {"overview", "diagnostic", "tradeoff", "sensitivity"}:
+            continue
+        if not any(token in name for name in table_names):
+            missing.append(str(expected))
+    if deliverable.task_type == "optimization" and not any(
+        any(token in name for token in OPTIMIZATION_MODEL_TOKENS)
+        for name in table_names
+    ):
+        if "optimization_result" not in missing:
+            missing.append("optimization_result")
+    return missing

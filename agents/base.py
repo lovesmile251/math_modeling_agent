@@ -48,6 +48,7 @@ A_MODEL_PROPOSAL = "model_proposal"
 A_MODEL_CRITIQUE = "model_critique"
 A_MODEL_DECISION = "model_decision"
 A_FORMULATION_SPEC = "formulation_spec"
+A_TASK_DELIVERABLE_SPEC = "task_deliverable_spec"
 A_EXPERIMENT_PLAN = "experiment_plan"
 A_EXPERIMENT_REPORT = "experiment_report"
 A_CODE_PLAN = "code_plan"
@@ -154,6 +155,23 @@ class ProblemSpec:
 
 
 @dataclass
+class TaskDeliverableSpec:
+    """Expected outputs and evidence contract for one decomposed task."""
+
+    task_id: str = ""
+    task_type: str = "exploration"
+    objective: str = ""
+    required_outputs: list[str] = field(default_factory=list)
+    required_models: list[str] = field(default_factory=list)
+    required_tables: list[str] = field(default_factory=list)
+    required_figures: list[str] = field(default_factory=list)
+    success_metrics: list[str] = field(default_factory=list)
+    evidence_requirements: list[str] = field(default_factory=list)
+    blocking_conditions: list[str] = field(default_factory=list)
+    status: str = "planned"
+
+
+@dataclass
 class DataProfile:
     """Structured data summary."""
     file_count: int = 0
@@ -232,6 +250,8 @@ class ResultRegistry:
     """Catalogue of every output file produced by execution."""
     entries: list[dict[str, Any]] = field(default_factory=list)
     source_path: str = ""
+    evidence_records: list[dict[str, Any]] = field(default_factory=list)
+    schema_version: str = "2.0"
 
 
 @dataclass
@@ -388,6 +408,7 @@ class WorkflowState:
     run_id: str = ""
     # structured artifacts
     problem_spec: ProblemSpec | None = None
+    task_deliverable_specs: list[TaskDeliverableSpec] = field(default_factory=list)
     data_profile: DataProfile | None = None
     model_proposal: ModelProposal | None = None
     model_critique: ModelCritique | None = None
@@ -474,6 +495,11 @@ class WorkflowState:
             obj = getattr(self, field_name, None)
             if obj is not None:
                 payload[field_name] = dataclasses.asdict(obj)  # type: ignore[arg-type]
+        if self.task_deliverable_specs:
+            payload["task_deliverable_specs"] = [
+                dataclasses.asdict(item)
+                for item in self.task_deliverable_specs
+            ]
         return payload
 
     @classmethod
@@ -495,6 +521,13 @@ class WorkflowState:
         state.durations = dict(data.get("durations", {}))
         state.decisions = list(data.get("decisions", []))
         _restore_structured(state, data, "problem_spec", ProblemSpec)
+        raw_deliverables = data.get("task_deliverable_specs")
+        if isinstance(raw_deliverables, list):
+            state.task_deliverable_specs = [
+                TaskDeliverableSpec(**item)
+                for item in raw_deliverables
+                if isinstance(item, dict)
+            ]
         _restore_structured(state, data, "data_profile", DataProfile)
         _restore_structured(state, data, "model_proposal", ModelProposal)
         _restore_structured(state, data, "model_critique", ModelCritique)

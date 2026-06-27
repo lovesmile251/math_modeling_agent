@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 
-from agents.base import A_PROBLEM_SPEC, Agent, ProblemSpec, WorkflowState
+from agents.base import A_PROBLEM_SPEC, A_TASK_DELIVERABLE_SPEC, Agent, ProblemSpec, TaskDeliverableSpec, WorkflowState
 from agents.model_selection_crew import DataProfileAgent, TaskDecompositionAgent
 from tools.data_profiler import summarize_data_files
 from tools.file_tool import write_text
@@ -38,6 +39,13 @@ class ProblemAgent(Agent):
             json.dumps(spec.__dict__, ensure_ascii=False, indent=2),
         )
         state.artifacts[A_PROBLEM_SPEC] = spec_path
+        deliverables = self._build_deliverable_specs(spec)
+        state.task_deliverable_specs = deliverables
+        deliverable_path = write_text(
+            state.workspace.logs_dir / "task_deliverable_spec.json",
+            json.dumps([dataclasses.asdict(item) for item in deliverables], ensure_ascii=False, indent=2),
+        )
+        state.artifacts[A_TASK_DELIVERABLE_SPEC] = deliverable_path
 
         if "problem_analysis" not in state.notes:
             state.notes["problem_analysis"] = self._format_analysis(spec, state)
@@ -127,6 +135,125 @@ class ProblemAgent(Agent):
             task_dependencies=dependencies,
             ambiguities=ambiguities,
             raw_analysis=state.notes.get("problem_analysis", ""),
+        )
+
+    def _build_deliverable_specs(self, spec: ProblemSpec) -> list[TaskDeliverableSpec]:
+        deliverables: list[TaskDeliverableSpec] = []
+        for index, task in enumerate(spec.subproblems, start=1):
+            task_type = str(task.get("task_type") or "exploration")
+            task_id = str(task.get("id") or f"Q{index}")
+            outputs, tables, figures, metrics, evidence, blockers = self._deliverable_contract(task_type)
+            deliverables.append(
+                TaskDeliverableSpec(
+                    task_id=task_id,
+                    task_type=task_type,
+                    objective=str(task.get("objective") or task.get("source_text") or ""),
+                    required_outputs=outputs,
+                    required_models=list(task.get("possible_model_types") or []),
+                    required_tables=tables,
+                    required_figures=figures,
+                    success_metrics=list(dict.fromkeys([*metrics, *list(task.get("metrics") or [])])),
+                    evidence_requirements=evidence,
+                    blocking_conditions=blockers,
+                    status="planned",
+                )
+            )
+        if not deliverables:
+            deliverables.append(
+                TaskDeliverableSpec(
+                    task_id="Q1",
+                    task_type="exploration",
+                    objective="完成数据理解与基础分析",
+                    required_outputs=["数据概览", "基础统计结论"],
+                    required_tables=["describe"],
+                    required_figures=["overview"],
+                    success_metrics=["missing_rate", "distribution_summary"],
+                    evidence_requirements=["至少一张描述统计表", "关键变量的样本量和缺失率"],
+                    blocking_conditions=["没有可读取数据时不得编造数值结论"],
+                )
+            )
+        return deliverables
+
+    def _deliverable_contract(
+        self,
+        task_type: str,
+    ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str]]:
+        contracts = {
+            "forecast": (
+                ["预测值", "误差评估", "趋势解释"],
+                ["forecast", "error_analysis"],
+                ["forecast"],
+                ["MAE", "RMSE", "MAPE"],
+                ["预测结果表", "误差指标", "原始时间序列字段"],
+                ["没有时间或顺序字段时不得声称时间序列预测"],
+            ),
+            "evaluation": (
+                ["指标权重", "综合得分", "排序结果"],
+                ["weights", "rank", "score"],
+                ["ranking"],
+                ["ranking_stability", "weight_sensitivity"],
+                ["权重表", "排名表", "指标方向说明"],
+                ["没有指标方向或结果表时不得给出最终排名"],
+            ),
+            "optimization": (
+                ["决策变量取值", "目标函数值", "约束满足情况"],
+                ["optimization", "allocation", "plan"],
+                ["tradeoff", "sensitivity"],
+                ["objective_value", "constraint_violation", "robustness"],
+                ["最优方案表", "目标函数值", "约束检查"],
+                ["没有优化结果表时不得给出最优方案"],
+            ),
+            "statistics": (
+                ["统计量", "显著性或置信区间", "解释结论"],
+                ["correlation", "regression", "hypothesis"],
+                ["diagnostic"],
+                ["p_value", "confidence_interval", "effect_size"],
+                ["统计检验结果表", "样本量", "变量定义"],
+                ["没有统计结果表时不得声称显著相关或因果关系"],
+            ),
+            "classification": (
+                ["预测标签", "分类性能", "混淆矩阵"],
+                ["classification", "confusion"],
+                ["confusion_matrix"],
+                ["accuracy", "precision", "recall", "F1"],
+                ["分类结果表", "评估指标", "标签字段"],
+                ["没有标签列时不得声称监督分类性能"],
+            ),
+            "clustering": (
+                ["簇标签", "簇画像", "聚类质量"],
+                ["cluster", "profile"],
+                ["cluster"],
+                ["silhouette_score", "cluster_stability"],
+                ["聚类结果表", "簇中心或簇统计"],
+                ["没有聚类结果表时不得声称分群结论"],
+            ),
+            "network": (
+                ["节点/边指标", "路径或社群结果", "网络解释"],
+                ["network", "path", "community"],
+                ["network"],
+                ["connectivity", "path_or_flow_validity"],
+                ["边表", "网络指标表", "关键节点或路径"],
+                ["没有边关系数据时不得声称网络结构结论"],
+            ),
+            "simulation": (
+                ["仿真轨迹", "参数设置", "不确定性分析"],
+                ["simulation", "sensitivity"],
+                ["simulation"],
+                ["replication_variance", "seed_sensitivity"],
+                ["仿真结果表", "随机种子或参数说明"],
+                ["没有仿真输出时不得声称动态传播或演化结果"],
+            ),
+        }
+        return contracts.get(
+            task_type,
+            (
+                ["数据概览", "基础统计结论"],
+                ["describe"],
+                ["overview"],
+                ["coverage", "missing_rate"],
+                ["描述统计表", "关键字段说明"],
+                ["没有可读取数据时不得编造数值结论"],
+            ),
         )
 
     def _format_analysis(self, spec: ProblemSpec, state: WorkflowState) -> str:

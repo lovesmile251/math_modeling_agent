@@ -5,6 +5,7 @@ from pathlib import Path
 from agents.base import Agent, WorkflowState
 from models.catalog import EXECUTABLE_MODEL_LABELS
 from tools.exporters import SUPPORTED_FORMATS, check_export_layout, export_document
+from tools.pdf_layout_check import check_pdf_render_layout, write_pdf_layout_report
 from tools.report_builder import build_document_from_paper
 
 _EXTRA_LABELS = {
@@ -50,6 +51,15 @@ def export_paper(
         results["_errors"] = errors  # type: ignore[assignment]
     if layout_warnings:
         results["_layout_warnings"] = layout_warnings  # type: ignore[assignment]
+    pdf_path = results.get("pdf")
+    if pdf_path:
+        report = check_pdf_render_layout(
+            pdf_path,
+            workspace.paper_dir / "pdf_screenshots",
+        )
+        write_pdf_layout_report(report, workspace.paper_dir / "pdf_layout_report.json")
+        if not report.passed:
+            results["_pdf_layout_warnings"] = report.warnings  # type: ignore[assignment]
     return results
 
 
@@ -69,11 +79,20 @@ class ExportAgent(Agent):
         results = export_paper(state.workspace, self.formats, title=self.title)
         errors = results.pop("_errors", None)  # type: ignore[assignment]
         layout_warnings = results.pop("_layout_warnings", None)  # type: ignore[assignment]
+        pdf_layout_warnings = results.pop("_pdf_layout_warnings", None)  # type: ignore[assignment]
         for fmt, path in results.items():
             state.artifacts[f"paper_{fmt}"] = path
+        pdf_layout_report = state.workspace.paper_dir / "pdf_layout_report.json"
+        if pdf_layout_report.exists():
+            state.artifacts["paper_pdf_layout_report"] = pdf_layout_report
         state.notes["export_formats"] = ", ".join(results.keys()) or "无"
         if layout_warnings:
             state.notes["export_layout_warnings"] = "; ".join(str(msg) for msg in layout_warnings)
+        if pdf_layout_warnings:
+            state.notes["export_pdf_layout_gate"] = "failed"
+            state.notes["export_pdf_layout_warnings"] = "; ".join(str(msg) for msg in pdf_layout_warnings)
+        elif pdf_layout_report:
+            state.notes["export_pdf_layout_gate"] = "passed"
         if errors:
             state.notes["export_errors"] = "; ".join(f"{fmt}: {msg}" for fmt, msg in errors.items())
         return state

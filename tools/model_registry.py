@@ -77,6 +77,10 @@ BASIC_MODEL_REGISTRY: dict[str, ModelEntry] = {
         "models.optimization.discrete", "scheduling_plan",
         "{var} = scheduling_plan(df)", "scheduling_plan",
     ),
+    "cement_esp_optimization": (
+        "models.optimization.esp", "cement_esp_optimization",
+        "{var} = cement_esp_optimization(df)", "cement_esp_optimization",
+    ),
     # statistics
     "correlation_analysis": (
         "models.statistics.correlation", "correlation_analysis",
@@ -97,6 +101,10 @@ BASIC_MODEL_REGISTRY: dict[str, ModelEntry] = {
     "anova_analysis": (
         "models.statistics.anova", "anova_analysis",
         "{var} = anova_analysis(df)", "anova_analysis",
+    ),
+    "quality_sampling_plan": (
+        "models.statistics.sampling", "quality_sampling_plan",
+        "{var} = quality_sampling_plan(df)", "quality_sampling_plan",
     ),
     # fitting
     "polynomial_fit": (

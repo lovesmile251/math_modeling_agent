@@ -101,27 +101,47 @@ def parameter_identification(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     coefficients, *_ = np.linalg.lstsq(design, y_next, rcond=None)
     fitted = design @ coefficients
+    residual = y_next - fitted
     metrics = _fit_metrics(y_next, fitted)
+    std_errors, ci_low, ci_high = _parameter_uncertainty(design, residual, coefficients)
+    phi = float(coefficients[1]) if len(coefficients) > 1 else np.nan
+    stable = bool(np.isfinite(phi) and abs(phi) < 1.0)
+    time_constant = _discrete_time_constant(phi)
+    equation = _dynamic_equation(str(target_column), parameter_names, coefficients)
 
     rows: list[dict[str, float | str | int]] = [
         {
             "target": str(target_column),
             "parameter": "intercept",
             "estimate": float(coefficients[0]),
+            "std_error": float(std_errors[0]),
+            "ci95_low": float(ci_low[0]),
+            "ci95_high": float(ci_high[0]),
             "r_squared": metrics["r_squared"],
             "rmse": metrics["rmse"],
+            "stability_indicator": int(stable),
+            "state_feedback_abs": abs(phi) if np.isfinite(phi) else np.nan,
+            "discrete_time_constant": time_constant,
+            "equation": equation,
             "sample_size": int(len(y_next)),
             "method": "first_order_dynamic_parameter_identification",
         }
     ]
-    for name, coefficient in zip(parameter_names, coefficients[1:]):
+    for index, (name, coefficient) in enumerate(zip(parameter_names, coefficients[1:]), start=1):
         rows.append(
             {
                 "target": str(target_column),
                 "parameter": str(name),
                 "estimate": float(coefficient),
+                "std_error": float(std_errors[index]),
+                "ci95_low": float(ci_low[index]),
+                "ci95_high": float(ci_high[index]),
                 "r_squared": metrics["r_squared"],
                 "rmse": metrics["rmse"],
+                "stability_indicator": int(stable),
+                "state_feedback_abs": abs(phi) if np.isfinite(phi) else np.nan,
+                "discrete_time_constant": time_constant,
+                "equation": equation,
                 "sample_size": int(len(y_next)),
                 "method": "first_order_dynamic_parameter_identification",
             }
@@ -240,6 +260,40 @@ def _fit_metrics(y: np.ndarray, fitted: np.ndarray) -> dict[str, float]:
     residual_ss = float(np.sum(residual**2))
     r_squared = 1.0 if total_ss == 0 else 1.0 - residual_ss / total_ss
     return {"r_squared": float(r_squared), "rmse": float(np.sqrt(np.mean(residual**2)))}
+
+
+def _parameter_uncertainty(
+    design: np.ndarray,
+    residual: np.ndarray,
+    coefficients: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    dof = max(int(design.shape[0] - design.shape[1]), 1)
+    sigma2 = float(np.sum(residual**2) / dof)
+    covariance = sigma2 * np.linalg.pinv(design.T @ design)
+    std_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
+    if len(std_errors) != len(coefficients):
+        std_errors = np.full(len(coefficients), np.nan)
+    ci_low = coefficients - 1.96 * std_errors
+    ci_high = coefficients + 1.96 * std_errors
+    return std_errors, ci_low, ci_high
+
+
+def _discrete_time_constant(phi: float) -> float:
+    if not np.isfinite(phi) or abs(phi) <= 1e-12 or abs(phi) >= 1.0:
+        return np.nan
+    return float(-1.0 / np.log(abs(phi)))
+
+
+def _dynamic_equation(target: str, parameter_names: list[str], coefficients: np.ndarray) -> str:
+    terms = [f"{coefficients[0]:.6g}"]
+    for name, coefficient in zip(parameter_names, coefficients[1:]):
+        if name == "state_feedback":
+            label = f"{target}[t]"
+        else:
+            label = f"{name}[t]"
+        sign = "+" if coefficient >= 0 else "-"
+        terms.append(f"{sign} {abs(coefficient):.6g}*{label}")
+    return f"{target}[t+1] = " + " ".join(terms)
 
 
 def _choose_target(df: pd.DataFrame) -> str:

@@ -40,7 +40,16 @@ class EvidenceAgent(Agent):
         state.result_registry = registry
         registry_path = write_text(
             state.workspace.logs_dir / "result_registry.json",
-            json.dumps({"entries": registry.entries, "source_path": registry.source_path}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {
+                    "schema_version": registry.schema_version,
+                    "entries": registry.entries,
+                    "source_path": registry.source_path,
+                    "evidence_records": registry.evidence_records,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
         )
         state.artifacts["result_registry"] = registry_path
 
@@ -60,12 +69,16 @@ class EvidenceAgent(Agent):
     # ── result registry ──────────────────────────────────────────────────
     def _build_registry(self, state: WorkflowState) -> ResultRegistry:
         entries: list[dict] = []
+        evidence_records: list[dict] = []
 
         # scan tables
         for table_path in sorted(state.workspace.tables_dir.glob("*.csv")):
             try:
                 import pandas as pd
                 df = pd.read_csv(table_path, nrows=100)
+                profile = self._table_profile(df)
+                table_evidence = self._table_evidence_records(table_path, df, len(evidence_records))
+                evidence_records.extend(table_evidence)
                 entries.append({
                     "type": "table",
                     "name": table_path.stem,
@@ -73,6 +86,8 @@ class EvidenceAgent(Agent):
                     "rows": len(df),
                     "columns": list(df.columns),
                     "numeric_columns": list(df.select_dtypes(include="number").columns),
+                    "profile": profile,
+                    "evidence_ids": [item["evidence_id"] for item in table_evidence],
                     "sha256": self._hash_file(table_path),
                 })
             except Exception:
@@ -116,80 +131,50 @@ class EvidenceAgent(Agent):
                 "bytes": manifest_path.stat().st_size,
             })
 
-        return ResultRegistry(entries=entries, source_path=str(state.workspace.root))
+        return ResultRegistry(
+            entries=entries,
+            source_path=str(state.workspace.root),
+            evidence_records=evidence_records,
+        )
 
     # ── claim evidence map ───────────────────────────────────────────────
     def _build_claim_map(self, state: WorkflowState, registry: ResultRegistry) -> ClaimEvidenceMap:
         claims: list[ClaimEvidence] = []
         counter = 0
 
-        for entry in registry.entries:
-            if entry.get("type") != "table":
+        evidence_records = registry.evidence_records or self._records_from_legacy_entries(registry)
+        if not evidence_records:
+            return ClaimEvidenceMap(claims=[], coverage_pct=0.0, unmapped_claims=[])
+
+        for record in evidence_records:
+            if record.get("kind") != "column_stat":
                 continue
-
-            path = Path(entry["path"])
-            try:
-                import pandas as pd
-                df = pd.read_csv(path)
-            except Exception:
+            if record.get("statistic") != "mean_std":
                 continue
+            counter += 1
+            claims.append(ClaimEvidence(
+                claim_id=f"C-{counter:03d}",
+                claim=record["claim"],
+                model_id=self._guess_model_id(str(record.get("table", ""))),
+                source_file=str(record.get("source_file", "")),
+                source_rows=list(record.get("source_rows", [])),
+                calculation=str(record.get("calculation", "")),
+                paper_sections=["结果分析"],
+            ))
 
-            table_name = entry.get("name", path.stem)
-            numeric_cols = entry.get("numeric_columns", [])
-            if not numeric_cols:
-                numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-
-            # for each numeric column, extract top-N values as potential claims
-            for col in numeric_cols[:5]:
-                if col not in df.columns:
-                    continue
-                series = pd.to_numeric(df[col], errors="coerce").dropna()
-                if series.empty:
-                    continue
-
-                # key statistics
-                mean_val = series.mean()
-                std_val = series.std()
-                max_val = series.max()
-                min_val = series.min()
-                best_row = series.idxmax() if pd.notna(series.idxmax()) else 0
-                worst_row = series.idxmin() if pd.notna(series.idxmin()) else 0
-
-                counter += 1
-                claims.append(ClaimEvidence(
-                    claim_id=f"C-{counter:03d}",
-                    claim=f"{table_name} 中 {col} 的均值为 {mean_val:.4f}，标准差为 {std_val:.4f}",
-                    model_id=self._guess_model_id(table_name),
-                    source_file=str(path),
-                    source_rows=[int(best_row), int(worst_row)],
-                    calculation=f"mean({col}) = {mean_val:.4f}, std({col}) = {std_val:.4f}",
-                    paper_sections=["结果分析"],
-                ))
-
-            # extract top/bottom rows as ranked claims
-            if len(numeric_cols) >= 1:
-                primary_col = numeric_cols[0]
-                if primary_col not in df.columns:
-                    continue
-                sortable = pd.to_numeric(df[primary_col], errors="coerce")
-                valid_rows = df.loc[sortable.notna()].copy()
-                if valid_rows.empty:
-                    continue
-                valid_rows["_evidence_sort_value"] = sortable.loc[valid_rows.index]
-                df_sorted = valid_rows.sort_values("_evidence_sort_value", ascending=False).head(3)
-                if len(df_sorted) > 0:
-                    counter += 1
-                    top_rows = list(df_sorted.index[:3])
-                    top_values = [f"{df_sorted.iloc[i]['_evidence_sort_value']:.4g}" for i in range(min(3, len(df_sorted)))]
-                    claims.append(ClaimEvidence(
-                        claim_id=f"C-{counter:03d}",
-                        claim=f"{table_name} 按 {primary_col} 排序，前3名取值：{', '.join(top_values)}",
-                        model_id=self._guess_model_id(table_name),
-                        source_file=str(path),
-                        source_rows=top_rows,
-                        calculation=f"sort({primary_col}, descending).head(3)",
-                        paper_sections=["模型对比", "结果分析"],
-                    ))
+        for record in evidence_records:
+            if record.get("kind") != "rank":
+                continue
+            counter += 1
+            claims.append(ClaimEvidence(
+                claim_id=f"C-{counter:03d}",
+                claim=record["claim"],
+                model_id=self._guess_model_id(str(record.get("table", ""))),
+                source_file=str(record.get("source_file", "")),
+                source_rows=list(record.get("source_rows", [])),
+                calculation=str(record.get("calculation", "")),
+                paper_sections=["模型对比", "结果分析"],
+            ))
 
         # compute coverage
         total_claims = len(claims)
@@ -213,6 +198,92 @@ class EvidenceAgent(Agent):
             return digest.hexdigest()
         except Exception:
             return ""
+
+    def _table_profile(self, df) -> dict:
+        numeric = df.select_dtypes(include="number")
+        return {
+            "row_count_sampled": int(len(df)),
+            "column_count": int(len(df.columns)),
+            "numeric_column_count": int(len(numeric.columns)),
+            "missing_values": {str(column): int(df[column].isna().sum()) for column in df.columns},
+        }
+
+    def _table_evidence_records(self, path: Path, df, offset: int) -> list[dict]:
+        import pandas as pd
+
+        records: list[dict] = []
+        table_name = path.stem
+        numeric_cols = [
+            column
+            for column in df.columns
+            if pd.to_numeric(df[column], errors="coerce").notna().any()
+        ]
+        for col in numeric_cols[:8]:
+            series = pd.to_numeric(df[col], errors="coerce").dropna()
+            if series.empty:
+                continue
+            mean_val = float(series.mean())
+            std_val = float(series.std())
+            best_row = int(series.idxmax()) if pd.notna(series.idxmax()) else 0
+            worst_row = int(series.idxmin()) if pd.notna(series.idxmin()) else 0
+            records.append(
+                {
+                    "evidence_id": f"E-{offset + len(records) + 1:04d}",
+                    "kind": "column_stat",
+                    "table": table_name,
+                    "column": str(col),
+                    "statistic": "mean_std",
+                    "value": {"mean": round(mean_val, 6), "std": round(std_val, 6)},
+                    "source_file": str(path),
+                    "source_rows": [best_row, worst_row],
+                    "calculation": f"mean({col}) = {mean_val:.4f}, std({col}) = {std_val:.4f}",
+                    "claim": f"{table_name} 中 {col} 的均值为 {mean_val:.4f}，标准差为 {std_val:.4f}",
+                }
+            )
+
+        if numeric_cols:
+            primary_col = numeric_cols[0]
+            sortable = pd.to_numeric(df[primary_col], errors="coerce")
+            valid_rows = df.loc[sortable.notna()].copy()
+            if not valid_rows.empty:
+                valid_rows["_evidence_sort_value"] = sortable.loc[valid_rows.index]
+                df_sorted = valid_rows.sort_values("_evidence_sort_value", ascending=False).head(3)
+                top_rows = [int(item) for item in list(df_sorted.index[:3])]
+                top_values = [
+                    f"{df_sorted.iloc[i]['_evidence_sort_value']:.4g}"
+                    for i in range(min(3, len(df_sorted)))
+                ]
+                records.append(
+                    {
+                        "evidence_id": f"E-{offset + len(records) + 1:04d}",
+                        "kind": "rank",
+                        "table": table_name,
+                        "column": str(primary_col),
+                        "statistic": "top3_desc",
+                        "value": top_values,
+                        "source_file": str(path),
+                        "source_rows": top_rows,
+                        "calculation": f"sort({primary_col}, descending).head(3)",
+                        "claim": f"{table_name} 按 {primary_col} 排序，前3名取值：{', '.join(top_values)}",
+                    }
+                )
+        return records
+
+    def _records_from_legacy_entries(self, registry: ResultRegistry) -> list[dict]:
+        records: list[dict] = []
+        for entry in registry.entries:
+            if entry.get("type") != "table":
+                continue
+            path = Path(str(entry.get("path", "")))
+            if not path.exists():
+                continue
+            try:
+                import pandas as pd
+                df = pd.read_csv(path)
+            except Exception:
+                continue
+            records.extend(self._table_evidence_records(path, df, len(records)))
+        return records
 
     @staticmethod
     def _guess_model_id(table_name: str) -> str:
@@ -239,6 +310,8 @@ class EvidenceAgent(Agent):
             "friend": "friend_recommendation",
             "propagation": "information_propagation",
             "influence": "influence_maximization",
+            "esp": "cement_esp_optimization",
+            "cement": "cement_esp_optimization",
         }
         for keyword, model_id in model_keywords.items():
             if keyword in table_lower:

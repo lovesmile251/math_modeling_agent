@@ -178,6 +178,8 @@ def _count_model_outputs(summary_path: Path) -> int:
 
 
 def _missing_deliverable_tables(deliverable, table_files: list[Path]) -> list[str]:
+    if deliverable.task_type != "optimization":
+        return []
     if not deliverable.required_tables:
         return []
     table_names = [path.stem.lower() for path in table_files]

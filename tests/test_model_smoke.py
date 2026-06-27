@@ -50,6 +50,9 @@ def _build_model_mapping():
     mapping["bin_packing"] = (bin_packing_plan, False, False, False)
     mapping["scheduling_plan"] = (scheduling_plan, False, False, False)
 
+    from models.optimization.esp import cement_esp_optimization
+    mapping["cement_esp_optimization"] = (cement_esp_optimization, False, False, False)
+
     from models.optimization.advanced import (
         astar_path_plan,
         integer_branch_bound,
@@ -128,6 +131,9 @@ def _build_model_mapping():
 
     from models.statistics.anova import anova_analysis
     mapping["anova_analysis"] = (anova_analysis, False, False, False)
+
+    from models.statistics.sampling import quality_sampling_plan
+    mapping["quality_sampling_plan"] = (quality_sampling_plan, False, False, False)
 
     from models.statistics.monte_carlo import monte_carlo_simulation
     mapping["monte_carlo"] = (monte_carlo_simulation, False, False, False)
@@ -286,6 +292,25 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
             "profit": rng.integers(30, 150, 10).astype(float),
         })
 
+    if model_id == "cement_esp_optimization":
+        rows = 48
+        return pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=rows, freq="min"),
+            "Temp_C": rng.normal(126, 4, rows),
+            "C_in_gNm3": rng.normal(36, 5, rows),
+            "Q_Nm3h": rng.normal(462000, 12000, rows),
+            "U1_kV": rng.normal(59, 3, rows),
+            "U2_kV": rng.normal(59, 3, rows),
+            "U3_kV": rng.normal(49, 2, rows),
+            "U4_kV": rng.normal(49, 2, rows),
+            "T1_s": rng.normal(230, 10, rows),
+            "T2_s": rng.normal(230, 10, rows),
+            "T3_s": rng.normal(440, 12, rows),
+            "T4_s": rng.normal(440, 12, rows),
+            "C_out_mgNm3": rng.normal(49.8, 0.2, rows),
+            "P_total_kW": rng.normal(1770, 70, rows),
+        })
+
     if model_id in ("var_cvar_risk", "garch_volatility", "black_scholes_pricing",
                     "markowitz_portfolio"):
         return pd.DataFrame({
@@ -385,6 +410,13 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
             "item_c": rng.integers(0, 2, 10).astype(float),
             "value": rng.normal(0, 1, 10),
             "weight": rng.uniform(0.5, 1.5, 10),
+        })
+
+    if model_id == "quality_sampling_plan":
+        return pd.DataFrame({
+            "sample_count": [100, 120, 80],
+            "defect_count": [8, 11, 7],
+            "defect_rate": [0.08, 0.0917, 0.0875],
         })
 
     if model_id in ("fft_frequency_analysis", "signal_denoising", "energy_detection"):

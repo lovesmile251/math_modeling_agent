@@ -25,6 +25,10 @@ MODEL_ID_ALIASES: dict[str, str] = {
     "kmeans": "kmeans_cluster",
     "dbscan": "dbscan_cluster",
     "pca_analysis": "pca",
+    "esp": "cement_esp_optimization",
+    "cement_esp": "cement_esp_optimization",
+    "electrostatic_precipitator": "cement_esp_optimization",
+    "electrostatic_precipitator_optimization": "cement_esp_optimization",
 }
 
 

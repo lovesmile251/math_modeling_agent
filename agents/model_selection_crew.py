@@ -696,7 +696,7 @@ class CandidateModelAgent:
         "classification": ("logistic_classifier", "naive_bayes_classifier", "knn_classifier"),
         "clustering": ("kmeans_cluster", "dbscan_cluster", "hierarchical_cluster", "pca"),
         "network": ("graph_centrality", "graph_shortest_paths", "graph_mst", "community_detection"),
-        "statistics": ("correlation_analysis", "linear_regression", "parameter_estimation", "hypothesis_tests"),
+        "statistics": ("correlation_analysis", "linear_regression", "parameter_estimation", "hypothesis_tests", "quality_sampling_plan"),
         "simulation": ("monte_carlo", "logistic_growth", "sir_model", "signal_denoising"),
         "exploration": ("trend_forecast", "entropy_weights", "topsis_rank"),
     }
@@ -823,13 +823,28 @@ class CandidateModelAgent:
             self._add_candidate(candidates, "capacity_gap", "evaluation", 36, "data profile detected paired demand-capacity fields", "capacity gap")
         if profile.has_objective_constraint_combo:
             self._add_candidate(candidates, "resource_allocation", "optimization", 30, "data profile detected objective and resource constraint fields", "resource optimization")
+        if self._has_cement_esp_schema(profile):
+            self._add_candidate(
+                candidates,
+                "cement_esp_optimization",
+                "optimization",
+                96,
+                "检测到水泥窑 ESP 标准字段：入口/出口浓度、烟气流量、四电场电压与停留时间",
+                "cement ESP optimization",
+            )
+            candidates["cement_esp_optimization"].semantic_score = max(
+                candidates["cement_esp_optimization"].semantic_score,
+                96,
+            )
 
         explicit_hints = (
+            (("esp", "电除尘", "除尘器", "烟尘", "水泥窑"), "cement_esp_optimization", "optimization"),
             (("capacity gap", "shortage", "供需缺口", "容量缺口"), "capacity_gap", "evaluation"),
             (("shortest path", "最短路"), "graph_shortest_paths", "network"),
             (("maximum flow", "max flow", "最大流"), "graph_max_flow", "network"),
             (("community", "communities", "社区", "社群"), "community_detection", "network"),
-            (("hypothesis", "假设检验"), "hypothesis_tests", "statistics"),
+              (("hypothesis", "假设检验"), "hypothesis_tests", "statistics"),
+              (("抽样检测", "抽检", "次品率", "不合格率", "接收", "拒收", "acceptance sampling"), "quality_sampling_plan", "statistics"),
             (("monte carlo", "蒙特卡洛"), "monte_carlo", "simulation"),
             (("assignment", "指派", "匹配"), "assignment_plan", "optimization"),
             (("scheduling", "schedule", "调度", "排程"), "scheduling_plan", "optimization"),
@@ -849,7 +864,7 @@ class CandidateModelAgent:
                     f"题目明确指定或强烈指向 {model_id}",
                     "explicit intent",
                 )
-                if model_id in {"graph_max_flow", "community_detection", "pca"}:
+                if model_id in {"graph_max_flow", "community_detection", "pca", "cement_esp_optimization"}:
                     candidates[model_id].semantic_score = max(
                         candidates[model_id].semantic_score, 90
                     )
@@ -864,7 +879,7 @@ class CandidateModelAgent:
             (("补货", "库存策略"), "inventory_policy", "optimization"),
             (("季节性", "周期性", "未来一周"), "seasonal_forecast", "forecast"),
             (("交通流量", "车流量", "交通管控"), "traffic_flow", "network"),
-            (("抽样检测", "信度", "次品率"), "hypothesis_tests", "statistics"),
+            (("抽样检测", "信度", "次品率"), "quality_sampling_plan", "statistics"),
             (("干涉条纹", "红外光谱", "频谱"), "fft_frequency_analysis", "statistics"),
             (("定日镜", "测线", "重叠率"), "nonlinear_optimization", "optimization"),
             (("农作物", "种植策略"), "integer_programming", "optimization"),
@@ -874,7 +889,7 @@ class CandidateModelAgent:
             (("CT系统", "成像"), "image_registration", "classification"),
             (("中药材", "药材的鉴别"), "knn_classifier", "classification"),
             (("FAST", "主动反射面"), "nonlinear_optimization", "optimization"),
-        )
+          )
         for terms, model_id, task_type in domain_hints:
             if any(term.lower() in text for term in terms):
                 self._add_candidate(
@@ -889,6 +904,25 @@ class CandidateModelAgent:
                     candidates[model_id].semantic_score,
                     88,
                 )
+
+    def _has_cement_esp_schema(self, profile: DataProfile) -> bool:
+        columns = {column.lower() for column in profile.columns}
+        required = {
+            "temp_c",
+            "c_in_gnm3",
+            "q_nm3h",
+            "u1_kv",
+            "u2_kv",
+            "u3_kv",
+            "u4_kv",
+            "t1_s",
+            "t2_s",
+            "t3_s",
+            "t4_s",
+            "c_out_mgnm3",
+            "p_total_kw",
+        }
+        return required.issubset(columns)
 
     def _infer_task_type(self, entry: AlgorithmEntry) -> str:
         text = f"{entry.category} {entry.problem}".lower()
@@ -911,11 +945,11 @@ class ModelSuitabilityAgent:
     COMPARISON_HINTS: dict[str, tuple[str, ...]] = {
         "forecast": ("trend_forecast", "smoothing_forecast", "ridge_regression", "gradient_boosting"),
         "evaluation": ("entropy_weights", "topsis_rank", "grey_relation", "vikor"),
-        "optimization": ("resource_allocation", "knapsack_01", "integer_programming", "nonlinear_optimization"),
+        "optimization": ("resource_allocation", "cement_esp_optimization", "knapsack_01", "integer_programming", "nonlinear_optimization"),
         "classification": ("logistic_classifier", "naive_bayes_classifier", "knn_classifier"),
         "clustering": ("kmeans_cluster", "dbscan_cluster", "hierarchical_cluster"),
         "network": ("graph_centrality", "graph_shortest_paths", "community_detection"),
-        "statistics": ("correlation_analysis", "linear_regression", "hypothesis_tests"),
+        "statistics": ("correlation_analysis", "linear_regression", "hypothesis_tests", "quality_sampling_plan"),
         "simulation": ("monte_carlo", "sir_model", "logistic_growth"),
     }
 
@@ -1019,10 +1053,13 @@ class ModelSuitabilityAgent:
             candidate.data_score += 12
             candidate.reasons.append("paired demand-capacity fields detected")
 
-        if candidate.model_id in {"resource_allocation", "knapsack_01", "scheduling_plan", "nonlinear_optimization", "integer_programming", "multiobjective_optimization"}:
+        if candidate.model_id in {"resource_allocation", "cement_esp_optimization", "knapsack_01", "scheduling_plan", "nonlinear_optimization", "integer_programming", "multiobjective_optimization"}:
             if profile.has_objective_constraint_combo:
                 candidate.data_score += 14
                 candidate.reasons.append("objective-resource constraint combination detected")
+            if candidate.model_id == "cement_esp_optimization" and self._has_cement_esp_schema(profile):
+                candidate.data_score += 28
+                candidate.reasons.append("complete cement ESP process schema detected")
 
         if candidate.model_id in {"logistic_classifier", "naive_bayes_classifier", "knn_classifier", "smote_balance"}:
             if profile.binary_label_columns:
@@ -1036,6 +1073,25 @@ class ModelSuitabilityAgent:
             if profile.has_edge_table:
                 candidate.data_score += 12
                 candidate.reasons.append("source-target edge table detected")
+
+    def _has_cement_esp_schema(self, profile: DataProfile) -> bool:
+        columns = {column.lower() for column in profile.columns}
+        required = {
+            "temp_c",
+            "c_in_gnm3",
+            "q_nm3h",
+            "u1_kv",
+            "u2_kv",
+            "u3_kv",
+            "u4_kv",
+            "t1_s",
+            "t2_s",
+            "t3_s",
+            "t4_s",
+            "c_out_mgnm3",
+            "p_total_kw",
+        }
+        return required.issubset(columns)
 
     def _condition_matches(self, condition: str, model_id: str, profile: DataProfile, task_type: str) -> bool:
         """Check if a not_recommended_when condition matches the current data/task context."""

@@ -44,6 +44,7 @@ from tools.file_tool import discover_data_files, list_data_files, read_problem_f
 from tools.llm_client import build_llm_client
 from tools.model_ids import normalize_model_ids
 from tools.logging_setup import setup_logging
+from tools.rework_router import build_rework_plan, write_rework_plan
 
 
 # ── phases that pause for user confirmation ──
@@ -570,6 +571,14 @@ class ModelingWorkflow:
             pass
 
     def _write_diagnostics(self, state: WorkflowState, log) -> None:
+        rework_plan = build_rework_plan(state)
+        if rework_plan is not None:
+            route = rework_plan.route
+            state.notes["auto_rework_target_phase"] = route.target_phase.value
+            state.notes["auto_rework_reason"] = route.reason
+            state.notes["auto_rework_severity"] = route.severity
+            state.notes["auto_rework_rerun_from_phase"] = rework_plan.rerun_from_phase.value
+            state.artifacts["auto_rework_plan"] = write_rework_plan(self.workspace, rework_plan)
         diag = {
             "errors": state.errors,
             "durations_s": state.durations,
@@ -577,6 +586,8 @@ class ModelingWorkflow:
             "phase": state.phase.value,
             "phase_status": dict(state.phase_status),
             "decisions": state.decisions,
+            "auto_rework_route": rework_plan.route.to_dict() if rework_plan else None,
+            "auto_rework_plan": rework_plan.to_dict() if rework_plan else None,
         }
         diag["workspace_root"] = str(self.workspace.root)
         diag_path = self.workspace.logs_dir / "workflow_diagnostics.json"

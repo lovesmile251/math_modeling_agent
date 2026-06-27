@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agents.base import Agent, WorkflowState
 from models.catalog import EXECUTABLE_MODEL_LABELS
-from tools.exporters import SUPPORTED_FORMATS, export_document
+from tools.exporters import SUPPORTED_FORMATS, check_export_layout, export_document
 from tools.report_builder import build_document_from_paper
 
 _EXTRA_LABELS = {
@@ -40,6 +40,7 @@ def export_paper(
 
     results: dict[str, Path] = {}
     errors: dict[str, str] = {}
+    layout_warnings = check_export_layout(document)
     for fmt in formats:
         try:
             results[fmt] = export_document(document, fmt, workspace.paper_dir)
@@ -47,6 +48,8 @@ def export_paper(
             errors[fmt] = str(exc)
     if errors:
         results["_errors"] = errors  # type: ignore[assignment]
+    if layout_warnings:
+        results["_layout_warnings"] = layout_warnings  # type: ignore[assignment]
     return results
 
 
@@ -65,9 +68,12 @@ class ExportAgent(Agent):
             return state
         results = export_paper(state.workspace, self.formats, title=self.title)
         errors = results.pop("_errors", None)  # type: ignore[assignment]
+        layout_warnings = results.pop("_layout_warnings", None)  # type: ignore[assignment]
         for fmt, path in results.items():
             state.artifacts[f"paper_{fmt}"] = path
         state.notes["export_formats"] = ", ".join(results.keys()) or "无"
+        if layout_warnings:
+            state.notes["export_layout_warnings"] = "; ".join(str(msg) for msg in layout_warnings)
         if errors:
             state.notes["export_errors"] = "; ".join(f"{fmt}: {msg}" for fmt, msg in errors.items())
         return state

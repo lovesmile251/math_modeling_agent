@@ -20,6 +20,10 @@ from tools.math_render import render_latex
 # STSong-Light CID font so Chinese renders without any external font file.
 _DOCX_CJK_FONT = "SimSun"
 _PDF_CJK_FONT = "STSong-Light"
+_DOCX_CODE_FONT = "Consolas"
+_MAX_TABLE_COLUMNS = 8
+_LONG_TABLE_ROWS = 24
+_LONG_CODE_LINE = 96
 
 
 def _equation_dir(output_path: Path) -> Path:
@@ -80,7 +84,7 @@ def export_docx(doc: Document, output_path: Path) -> Path:
         elif isinstance(block, CodeBlock):
             para = docx.add_paragraph()
             run = para.add_run(block.text)
-            run.font.name = "Consolas"
+            _docx_set_run_fonts(run, _DOCX_CODE_FONT, _DOCX_CJK_FONT)
             run.font.size = Pt(9)
         elif isinstance(block, ImageBlock):
             if block.path.exists():
@@ -92,22 +96,48 @@ def export_docx(doc: Document, output_path: Path) -> Path:
                     cap = docx.add_paragraph(block.caption)
                     cap.alignment = 1  # centered
         elif isinstance(block, TableBlock):
-            if block.caption:
-                docx.add_paragraph(block.caption)
-            table = docx.add_table(rows=1, cols=len(block.headers))
-            table.style = "Table Grid"
-            for idx, header in enumerate(block.headers):
-                table.rows[0].cells[idx].text = ""
-                _docx_add_runs(table.rows[0].cells[idx].paragraphs[0], header, eq_dir)
-            for row in block.rows:
-                cells = table.add_row().cells
-                for idx, value in enumerate(row[: len(block.headers)]):
-                    cells[idx].text = ""
-                    _docx_add_runs(cells[idx].paragraphs[0], value, eq_dir)
+            for caption, headers, rows in _split_table_columns(block):
+                if caption:
+                    docx.add_paragraph(caption)
+                table = docx.add_table(rows=1, cols=len(headers))
+                table.style = "Table Grid"
+                for idx, header in enumerate(headers):
+                    table.rows[0].cells[idx].text = ""
+                    _docx_add_runs(table.rows[0].cells[idx].paragraphs[0], header, eq_dir)
+                for row in rows:
+                    cells = table.add_row().cells
+                    for idx, value in enumerate(row[: len(headers)]):
+                        cells[idx].text = ""
+                        _docx_add_runs(cells[idx].paragraphs[0], value, eq_dir)
+                _docx_format_table(table, len(headers), Inches, Pt)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     docx.save(str(output_path))
     return output_path
+
+
+def _docx_set_run_fonts(run, ascii_font: str, east_asia_font: str) -> None:
+    from docx.oxml.ns import qn
+
+    run.font.name = ascii_font
+    rpr = run._element.get_or_add_rPr()
+    rfonts = rpr.get_or_add_rFonts()
+    rfonts.set(qn("w:ascii"), ascii_font)
+    rfonts.set(qn("w:hAnsi"), ascii_font)
+    rfonts.set(qn("w:eastAsia"), east_asia_font)
+
+
+def _docx_format_table(table, col_count: int, Inches, Pt) -> None:
+    table.autofit = True
+    font_size = _table_font_size(col_count, rows=len(table.rows))
+    cell_width = max(0.55, min(1.25, 6.2 / max(col_count, 1)))
+    for row in table.rows:
+        for cell in row.cells:
+            cell.width = Inches(cell_width)
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    _docx_set_run_fonts(run, _DOCX_CJK_FONT, _DOCX_CJK_FONT)
+                    run.font.size = Pt(font_size)
 
 
 def _docx_add_runs(paragraph, text: str, eq_dir: Path) -> None:
@@ -189,7 +219,15 @@ def export_pdf(doc: Document, output_path: Path) -> Path:
     body = ParagraphStyle("Body", parent=base["Normal"], fontName=_PDF_CJK_FONT, fontSize=10.5, leading=16)
     title_style = ParagraphStyle("DocTitle", parent=body, fontSize=20, leading=26, spaceAfter=14, alignment=TA_CENTER)
     caption_style = ParagraphStyle("Caption", parent=body, fontSize=9, textColor=colors.grey, alignment=TA_CENTER)
-    code_style = ParagraphStyle("Code", parent=base["Code"], fontSize=8, leading=11)
+    code_style = ParagraphStyle(
+        "Code",
+        parent=base["Code"],
+        fontName=_PDF_CJK_FONT,
+        fontSize=8,
+        leading=11,
+        wordWrap="CJK",
+        splitLongWords=True,
+    )
     heading_styles = {
         level: ParagraphStyle(
             f"H{level}",
@@ -231,7 +269,7 @@ def export_pdf(doc: Document, output_path: Path) -> Path:
                 ListFlowable(items, bulletType="1" if block.ordered else "bullet", start="1" if block.ordered else None)
             )
         elif isinstance(block, CodeBlock):
-            story.append(Preformatted(block.text, code_style))
+            story.append(Preformatted(_wrap_code_text(block.text), code_style))
         elif isinstance(block, ImageBlock):
             flowable = _pdf_image(block.path, max_width, RLImage, ImageReader)
             if flowable is not None:
@@ -240,9 +278,7 @@ def export_pdf(doc: Document, output_path: Path) -> Path:
                     story.append(RLParagraph(_rl_inline(block.caption, eq_dir), caption_style))
                 story.append(Spacer(1, 0.2 * cm))
         elif isinstance(block, TableBlock):
-            if block.caption:
-                story.append(RLParagraph(_rl_inline(block.caption, eq_dir), caption_style))
-            story.append(_pdf_table(block, max_width, body, RLTable, TableStyle, colors, eq_dir))
+            story.extend(_pdf_table_flowables(block, max_width, body, RLTable, TableStyle, colors, eq_dir))
             story.append(Spacer(1, 0.2 * cm))
 
     SimpleDocTemplate(
@@ -290,36 +326,146 @@ def _rl_inline(text: str, eq_dir: Path) -> str:
     return "".join(parts)
 
 
-def _pdf_table(block: TableBlock, max_width: float, body_style, RLTable, TableStyle, colors, eq_dir: Path):
+def _pdf_table_flowables(block: TableBlock, max_width: float, body_style, RLTable, TableStyle, colors, eq_dir: Path):
+    flowables = []
+    for caption, headers, rows in _split_table_columns(block):
+        flowables.append(_pdf_table(caption, headers, rows, max_width, body_style, RLTable, TableStyle, colors, eq_dir))
+    return flowables
+
+
+def _pdf_table(caption: str, headers: list[str], rows: list[list[str]], max_width: float, body_style, RLTable, TableStyle, colors, eq_dir: Path):
     from reportlab.platypus import Paragraph as RLParagraph
+    try:
+        from reportlab.platypus import LongTable
+    except Exception:  # pragma: no cover - reportlab has LongTable in supported versions
+        LongTable = RLTable
 
     cell_style = body_style.clone("Cell")
-    cell_style.fontSize = 8.5
-    cell_style.leading = 11
-    header_cells = [RLParagraph(_rl_inline(h, eq_dir), cell_style) for h in block.headers]
-    data = [header_cells]
-    for row in block.rows:
-        padded = list(row[: len(block.headers)])
-        padded += [""] * (len(block.headers) - len(padded))
+    cell_style.fontSize = _table_font_size(len(headers), rows=len(rows))
+    cell_style.leading = cell_style.fontSize + 2.2
+    cell_style.wordWrap = "CJK"
+    cell_style.splitLongWords = True
+
+    data = []
+    repeat_rows = 1
+    header_index = 0
+    if caption:
+        caption_style = cell_style.clone("TableCaptionCell")
+        caption_style.fontSize = max(cell_style.fontSize, 8)
+        caption_style.leading = caption_style.fontSize + 3
+        data.append([RLParagraph(_rl_inline(caption, eq_dir), caption_style)] + [""] * (len(headers) - 1))
+        repeat_rows = 2
+        header_index = 1
+
+    header_cells = [RLParagraph(_rl_inline(h, eq_dir), cell_style) for h in headers]
+    data.append(header_cells)
+    for row in rows:
+        padded = list(row[: len(headers)])
+        padded += [""] * (len(headers) - len(padded))
         data.append([RLParagraph(_rl_inline(value, eq_dir), cell_style) for value in padded])
 
-    col_count = max(len(block.headers), 1)
-    col_width = max_width / col_count
-    table = RLTable(data, colWidths=[col_width] * col_count, repeatRows=1)
+    col_count = max(len(headers), 1)
+    col_widths = _pdf_col_widths(headers, rows, max_width)
+    table_cls = LongTable if len(rows) >= _LONG_TABLE_ROWS else RLTable
+    try:
+        table = table_cls(data, colWidths=col_widths, repeatRows=repeat_rows, splitByRow=True, splitInRow=True)
+    except TypeError:
+        table = table_cls(data, colWidths=col_widths, repeatRows=repeat_rows, splitByRow=True)
     table.setStyle(
         TableStyle(
             [
                 ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3b6ea5")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("BACKGROUND", (0, header_index), (-1, header_index), colors.HexColor("#3b6ea5")),
+                ("TEXTCOLOR", (0, header_index), (-1, header_index), colors.white),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3f8")]),
+                ("ROWBACKGROUNDS", (0, header_index + 1), (-1, -1), [colors.white, colors.HexColor("#eef3f8")]),
                 ("LEFTPADDING", (0, 0), (-1, -1), 3),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
+    if caption:
+        table.setStyle(
+            TableStyle(
+                [
+                    ("SPAN", (0, 0), (-1, 0)),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.white),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                    ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ]
+            )
+        )
     return table
+
+
+def _table_font_size(col_count: int, *, rows: int = 0) -> float:
+    if col_count >= 7:
+        return 6.8
+    if col_count >= 5:
+        return 7.5
+    if rows >= _LONG_TABLE_ROWS:
+        return 8.0
+    return 8.5
+
+
+def _pdf_col_widths(headers: list[str], rows: list[list[str]], max_width: float) -> list[float]:
+    col_count = max(len(headers), 1)
+    weights = []
+    sample_rows = rows[:30]
+    for idx, header in enumerate(headers):
+        max_len = len(str(header))
+        for row in sample_rows:
+            if idx < len(row):
+                max_len = max(max_len, min(len(str(row[idx])), 36))
+        weights.append(max(4, min(max_len, 24)))
+    total = sum(weights) or col_count
+    min_width = min(max_width / col_count, 42)
+    widths = [max(min_width, max_width * weight / total) for weight in weights]
+    scale = max_width / sum(widths)
+    return [width * scale for width in widths]
+
+
+def _split_table_columns(block: TableBlock, max_columns: int = _MAX_TABLE_COLUMNS) -> list[tuple[str, list[str], list[list[str]]]]:
+    headers = list(block.headers) or [""]
+    rows = [(list(row) + [""] * len(headers))[: len(headers)] for row in block.rows]
+    if len(headers) <= max_columns:
+        return [(block.caption, headers, rows)]
+
+    chunks: list[tuple[str, list[str], list[list[str]]]] = []
+    key_header = headers[0]
+    remaining = list(range(1, len(headers)))
+    chunk_size = max(max_columns - 1, 1)
+    total = (len(remaining) + chunk_size - 1) // chunk_size
+    for chunk_no, start in enumerate(range(0, len(remaining), chunk_size), start=1):
+        indices = [0] + remaining[start : start + chunk_size]
+        chunk_headers = [headers[idx] for idx in indices]
+        chunk_rows = [[row[idx] if idx < len(row) else "" for idx in indices] for row in rows]
+        suffix = f" ({chunk_no}/{total}, key: {key_header})"
+        chunks.append(((block.caption or "Table") + suffix, chunk_headers, chunk_rows))
+    return chunks
+
+
+def _wrap_code_text(text: str, max_chars: int = _LONG_CODE_LINE) -> str:
+    import textwrap
+
+    wrapped: list[str] = []
+    for line in text.splitlines() or [""]:
+        if len(line) <= max_chars:
+            wrapped.append(line)
+            continue
+        indent = line[: len(line) - len(line.lstrip())]
+        wrapped.extend(
+            textwrap.wrap(
+                line,
+                width=max_chars,
+                subsequent_indent=indent + "    ",
+                break_long_words=True,
+                break_on_hyphens=False,
+                replace_whitespace=False,
+                drop_whitespace=False,
+            )
+        )
+    return "\n".join(wrapped)
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +617,29 @@ def _content_blocks(doc: Document):
 
 def _normalize_title(text: str) -> str:
     return "".join(str(text).split())
+
+
+def check_export_layout(doc: Document) -> list[str]:
+    """Return non-blocking layout warnings before rendering export files."""
+
+    warnings: list[str] = []
+    for index, block in enumerate(_content_blocks(doc), start=1):
+        if isinstance(block, CodeBlock):
+            long_lines = [line_no for line_no, line in enumerate(block.text.splitlines(), start=1) if len(line) > _LONG_CODE_LINE]
+            if long_lines:
+                warnings.append(f"block {index}: code lines exceed {_LONG_CODE_LINE} chars and will be wrapped")
+            if any(ord(ch) > 127 for ch in block.text):
+                warnings.append(f"block {index}: code block contains non-ASCII text; CJK export fonts will be used")
+        elif isinstance(block, TableBlock):
+            if len(block.headers) > _MAX_TABLE_COLUMNS:
+                warnings.append(
+                    f"block {index}: table has {len(block.headers)} columns and will be split for export"
+                )
+            if len(block.rows) >= _LONG_TABLE_ROWS:
+                warnings.append(
+                    f"block {index}: table has {len(block.rows)} rows and will use multi-page table layout"
+                )
+    return warnings
 
 
 def export_document(doc: Document, fmt: str, output_dir: Path, stem: str = "paper") -> Path:

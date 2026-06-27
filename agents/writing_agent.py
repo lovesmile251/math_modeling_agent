@@ -39,6 +39,13 @@ PLACEHOLDER_PATTERNS = (
     r"待补充",
     r"待完善",
     r"待确定",
+    r"未产出优化数值解",
+    r"未产出.*数值解",
+    r"未得到.*数值解",
+    r"后续计算",
+    r"后续可补充",
+    r"后续补充",
+    r"后续完善",
     r"占位",
     r"\bTODO\b",
     r"[xX]{3,}",
@@ -63,10 +70,14 @@ class WritingAgent(Agent):
                 if self._use_fast_writing():
                     paper = self._write_single_paper(state)
                     paper = clean_paper_text(paper)
+                    paper, regenerated = self._enforce_no_placeholder(state, load_prompt("paper_writing.md"), paper)
+                    paper = clean_paper_text(paper)
                     paper_path = write_text(state.workspace.paper_dir / "paper_draft.md", paper)
                     state.artifacts[A_PAPER] = paper_path
                     state.notes[K_WRITING_MODE] = "single_llm_fast"
                     state.notes["writing_agent_fast_mode"] = "true"
+                    if regenerated:
+                        state.notes["writing_agent_regenerated"] = "true"
                     quality = evaluate_paper_quality(paper)
                     state.notes[K_PAPER_QUALITY_SCORE] = str(quality.score)
                     state.notes[K_PAPER_QUALITY_REPORT] = format_quality_report(quality)
@@ -449,7 +460,8 @@ class WritingAgent(Agent):
             "上一稿存在以下占位符或疑似虚构内容，必须修正：\n"
             + "\n".join(f"- {snippet}" for snippet in sorted(set(offenders)))
             + "\n\n请重写完整论文：删除所有占位符，所有数值结论改用下面“真实结果数据”中的实际取值；"
-            "若真实结果数据不足以支撑某个结论，就如实写“数据不足，后续可补充”，不要虚构。\n\n"
+            "若真实结果数据不足以支撑某个结论，就删除该结论或改写为已完成数据范围内的保守结论；"
+            "不得写“待补充”“后续计算”“未产出优化数值解”等不可提交表述。\n\n"
             + self._build_llm_input(state)
         )
         try:
@@ -482,9 +494,10 @@ class WritingAgent(Agent):
                 "1. 删除所有非论文寒暄和生成说明。\n"
                 "2. 摘要逐题给模型、真实数值和结论意义。\n"
                 "3. 每个子问题必须按分析、模型、求解、结果、解释形成闭环。\n"
-                "4. 补充模型检验、误差分析、基准对比或灵敏度分析；如果结果数据不足，明确说明不足。\n"
+                "4. 补充模型检验、误差分析、基准对比或灵敏度分析；如果结果数据不足以支撑某个结论，删除该结论或限定为已有数据支持的结论。\n"
                 "5. 正文引用每张关键图表并解释图表含义。\n"
-                "6. 保持 Markdown 格式，公式用 \\( \\) 或 \\[ \\]，不要输出说明性前言。",
+                "6. 保持 Markdown 格式，公式用 \\( \\) 或 \\[ \\]，不要输出说明性前言。\n"
+                "7. 不得保留“待补充”“后续计算”“未产出优化数值解”等不可提交表述。",
             ]
         )
         try:

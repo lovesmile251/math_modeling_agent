@@ -5,7 +5,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from tools.exporters import export_document, export_docx, export_latex, export_pdf
+from tools.exporters import check_export_layout, export_document, export_docx, export_latex, export_pdf
 from tools.report_builder import (
     CodeBlock,
     Document,
@@ -150,3 +150,63 @@ def test_export_handles_missing_image(tmp_path):
     assert export_docx(doc, tmp_path / "a.docx").exists()
     assert export_pdf(doc, tmp_path / "a.pdf").exists()
     assert export_latex(doc, tmp_path / "a.tex").exists()
+
+
+def test_export_docx_code_block_sets_cjk_font(tmp_path):
+    doc = Document(title="code", blocks=[CodeBlock(text='print("\u4e2d\u6587")')])
+
+    out = export_docx(doc, tmp_path / "code.docx")
+
+    with ZipFile(out) as package:
+        document_xml = package.read("word/document.xml").decode("utf-8")
+    assert 'w:ascii="Consolas"' in document_xml
+    assert 'w:eastAsia="SimSun"' in document_xml
+
+
+def test_export_docx_splits_wide_tables(tmp_path):
+    headers = [f"h{i}" for i in range(10)]
+    rows = [[f"r{row}c{col}" for col in range(10)] for row in range(3)]
+    doc = Document(title="wide", blocks=[TableBlock(headers=headers, rows=rows, caption="wide table")])
+
+    out = export_docx(doc, tmp_path / "wide.docx")
+
+    from docx import Document as DocxDocument
+
+    docx = DocxDocument(str(out))
+    assert len(docx.tables) == 2
+    assert docx.tables[0].rows[0].cells[0].text == "h0"
+    assert docx.tables[1].rows[0].cells[0].text == "h0"
+
+
+def test_export_pdf_long_wide_table_has_no_blank_pages(tmp_path):
+    headers = [f"h{i}" for i in range(11)]
+    rows = [[f"r{row}c{col}" for col in range(11)] for row in range(80)]
+    doc = Document(title="wide pdf", blocks=[TableBlock(headers=headers, rows=rows, caption="long wide")])
+
+    out = export_pdf(doc, tmp_path / "wide.pdf")
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(out))
+    assert len(reader.pages) > 1
+    assert all((page.extract_text() or "").strip() for page in reader.pages)
+
+
+def test_check_export_layout_warns_for_export_risks():
+    headers = [f"h{i}" for i in range(9)]
+    rows = [[str(row)] * 9 for row in range(24)]
+    doc = Document(
+        title="layout",
+        blocks=[
+            CodeBlock(text="x = " + "1" * 120 + "\n# \u4e2d\u6587"),
+            TableBlock(headers=headers, rows=rows),
+        ],
+    )
+
+    warnings = check_export_layout(doc)
+
+    joined = "\n".join(warnings)
+    assert "code lines exceed" in joined
+    assert "non-ASCII text" in joined
+    assert "will be split" in joined
+    assert "multi-page table layout" in joined

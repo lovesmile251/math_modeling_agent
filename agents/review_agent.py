@@ -77,6 +77,23 @@ class ReviewAgent(Agent):
             if quality.score < 82:
                 findings.append(f"论文未达到国奖质量门禁：当前质量分 {quality.score}/100。")
                 suggestions.extend(quality.suggestions)
+            gate_failures = [
+                issue
+                for issue in quality.issues
+                if any(
+                    marker in issue
+                    for marker in (
+                        "Submission blocker",
+                        "Reference citations without matching entries",
+                        "Reference entries not cited in body",
+                        "Reference section is missing",
+                        "Core result table missing",
+                    )
+                )
+            ]
+            if gate_failures:
+                findings.extend(gate_failures)
+                suggestions.extend(quality.suggestions)
 
         if not findings:
             findings.append("基础闭环完整：代码、执行日志、结果分析和论文素材均已生成。")

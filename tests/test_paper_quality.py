@@ -155,6 +155,42 @@ def test_core_result_table_missing_blocks_high_score():
     assert report.score < 82
 
 
+def test_structured_paper_audit_flags_symbol_formula_and_citation_issues():
+    text = """# Paper
+
+## Abstract
+This paper reports problem one, problem two, and problem three with values 12.5, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, and 0.9.
+
+## Keywords
+optimization; sensitivity; validation
+
+## Symbol table
+| symbol | meaning |
+| --- | --- |
+| x | decision variable |
+
+## Model
+\\[y=a+b+c\\]
+\\[z=a+c+d\\]
+\\[q=b+c+d\\]
+
+## Results
+| metric | value |
+| --- | --- |
+| objective | 12.5 |
+Ref. 2 reports a comparison.
+
+## References
+[1] Zhang. Model validation. Journal, 2024.
+"""
+
+    report = evaluate_paper_quality(text)
+
+    assert report.metrics["display_equations"] >= 3
+    assert any("Formula numbering inconsistent" in issue for issue in report.issues)
+    assert any("Symbol definition mismatch" in issue for issue in report.issues)
+    assert any("Citation format issue" in issue for issue in report.issues)
+
 def _paper_fixture(
     *,
     keyword_line: str,

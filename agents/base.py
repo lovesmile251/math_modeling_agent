@@ -34,6 +34,27 @@ K_PAPER_EXPORT_SCORE = "paper_export_score"
 K_PREWRITING_GATE_STATUS = "prewriting_gate_status"
 K_PREWRITING_GATE_REPORT = "prewriting_gate_report"
 K_LLM_FAILURE_KIND = "llm_failure_kind"
+K_EXPORT_QUALITY_GATE = "export_quality_gate"
+K_EXPORT_BLOCKING_ISSUES = "export_blocking_issues"
+K_EXPORT_ERRORS = "export_errors"
+K_EXPORT_PDF_LAYOUT_GATE = "export_pdf_layout_gate"
+K_TASK_TRACEABILITY_GATE = "task_traceability_gate"
+K_TASK_TRACEABILITY_COVERAGE_PCT = "task_traceability_coverage_pct"
+K_TASK_TRACEABILITY_BLOCKING_ISSUES = "task_traceability_blocking_issues"
+K_STRONG_BASELINE_GATE = "strong_baseline_gate"
+K_STRONG_BASELINE_ISSUES = "strong_baseline_issues"
+K_INNOVATION_EVIDENCE_GATE = "innovation_evidence_gate"
+K_INNOVATION_EVIDENCE_ISSUES = "innovation_evidence_issues"
+K_AUTO_REWORK_STATUS = "auto_rework_status"
+K_AUTO_REWORK_RERUN_FROM_PHASE = "auto_rework_rerun_from_phase"
+QUALITY_GATE_NOTE_KEYS = (
+    K_EXPORT_QUALITY_GATE,
+    K_TASK_TRACEABILITY_GATE,
+    K_STRONG_BASELINE_GATE,
+    K_INNOVATION_EVIDENCE_GATE,
+    K_EXPORT_PDF_LAYOUT_GATE,
+    K_PREWRITING_GATE_STATUS,
+)
 # artifacts keys
 A_CODE = "code"
 A_EXECUTION_LOG = "execution_log"
@@ -55,6 +76,14 @@ A_CODE_PLAN = "code_plan"
 A_RESULT_REGISTRY = "result_registry"
 A_CLAIM_EVIDENCE_MAP = "claim_evidence_map"
 A_TRACEABILITY_REPORT = "traceability_report"
+A_TASK_TRACEABILITY_REPORT = "task_traceability_report"
+A_INNOVATION_EVIDENCE_REPORT = "innovation_evidence_report"
+A_AUTO_REWORK_PLAN = "auto_rework_plan"
+A_AUTO_REWORK_REPORT = "auto_rework_report"
+A_AUTO_REWORK_REPORT_MD = "auto_rework_report_md"
+A_PAPER_PDF_LAYOUT_REPORT = "paper_pdf_layout_report"
+A_WORKFLOW_GATE_SUMMARY = "workflow_gate_summary"
+A_WORKFLOW_GATE_SUMMARY_MD = "workflow_gate_summary_md"
 A_PAPER_OUTLINE = "paper_outline"
 A_SECTION_DRAFT = "section_draft"
 A_REVIEW_FINDINGS = "review_findings"

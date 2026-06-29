@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
+from difflib import get_close_matches
 
 from tools.model_registry import registered_model_ids
 
@@ -44,6 +45,14 @@ class NormalizedModelIds:
     dropped: list[str]
 
 
+@dataclass(frozen=True)
+class NormalizedModelDecision:
+    selected: list[str]
+    primary: str
+    baseline: str
+    dropped: list[str]
+
+
 def canonical_model_id(value: object) -> str | None:
     """Return the executable model_id for a raw LLM/UI value, if known."""
 
@@ -64,6 +73,9 @@ def canonical_model_id(value: object) -> str | None:
     alias = MODEL_ID_ALIASES.get(normalized)
     if alias in registry:
         return alias
+    close = get_close_matches(normalized, registry, n=1, cutoff=0.92)
+    if close:
+        return close[0]
     return None
 
 
@@ -84,3 +96,50 @@ def normalize_model_ids(values: Iterable[object]) -> NormalizedModelIds:
             selected.append(model_id)
             seen.add(model_id)
     return NormalizedModelIds(selected=selected, dropped=dropped)
+
+
+def normalize_model_decision(
+    *,
+    selected_model_ids: Iterable[object],
+    primary_model_id: object = "",
+    baseline_model_id: object = "",
+) -> NormalizedModelDecision:
+    """Normalize a full model decision and keep all IDs executable.
+
+    This is intentionally the single reconciliation point for LLM output,
+    user edits, and downstream workflow state. Unknown IDs are dropped instead
+    of being allowed to crash formulation or execution.
+    """
+
+    normalized = normalize_model_ids(selected_model_ids)
+    selected = list(normalized.selected)
+    dropped = list(normalized.dropped)
+
+    primary = canonical_model_id(primary_model_id)
+    raw_primary = str(primary_model_id or "").strip()
+    if primary is None and raw_primary:
+        dropped.append(raw_primary)
+
+    baseline = canonical_model_id(baseline_model_id)
+    raw_baseline = str(baseline_model_id or "").strip()
+    if baseline is None and raw_baseline:
+        dropped.append(raw_baseline)
+
+    if primary and primary not in selected:
+        selected.insert(0, primary)
+    if baseline and baseline not in selected:
+        selected.append(baseline)
+
+    if not primary and selected:
+        primary = selected[0]
+    if baseline == primary:
+        baseline = ""
+    if not baseline:
+        baseline = next((model_id for model_id in selected if model_id != primary), "")
+
+    return NormalizedModelDecision(
+        selected=selected,
+        primary=primary or "",
+        baseline=baseline or "",
+        dropped=list(dict.fromkeys(dropped)),
+    )

@@ -117,6 +117,35 @@ ALGORITHM_CATALOG: tuple[AlgorithmEntry, ...] = (
 )
 
 
+ALGORITHM_CATALOG = (
+    *ALGORITHM_CATALOG,
+    _entry(
+        "optimization",
+        "multi-stage dynamic programming",
+        ("dynamic programming",),
+        ("integer programming", "rolling optimization"),
+        ("dynamic programming", "multi-stage", "state transition", "dp"),
+        ("dynamic_programming_plan", "integer_programming"),
+    ),
+    _entry(
+        "network",
+        "independent cascade propagation",
+        ("independent cascade",),
+        ("SIR propagation", "influence maximization"),
+        ("independent cascade", "information propagation", "diffusion", "cascade"),
+        ("independent_cascade", "information_propagation"),
+    ),
+    _entry(
+        "statistics",
+        "structured statistical tests",
+        ("t test", "normality test", "correlation significance"),
+        ("permutation test", "bootstrap test"),
+        ("statistical test", "significance", "p-value", "effect size", "normality"),
+        ("statistical_test_suite", "hypothesis_tests"),
+    ),
+)
+
+
 EXECUTABLE_MODEL_LABELS = {
     "trend_forecast": "线性趋势预测",
     "entropy_weights": "熵权法指标权重",
@@ -171,6 +200,7 @@ EXECUTABLE_MODEL_LABELS = {
     "nonlinear_optimization": "非线性规划（梯度法）",
     "integer_programming": "整数规划（分支定界）",
     "multiobjective_optimization": "多目标加权求和优化",
+    "dynamic_programming_plan": "Dynamic programming staged allocation",
     "astar_path": "A* 路径规划",
     "tsp_route": "TSP 启发式路径",
     "vrp_route": "VRP 车辆路径（节约算法）",
@@ -180,6 +210,7 @@ EXECUTABLE_MODEL_LABELS = {
     "smote_balance": "SMOTE 不平衡分析",
     "nonlinear_embedding": "非线性降维（MDS）",
     "monte_carlo": "蒙特卡洛模拟",
+    "statistical_test_suite": "Structured statistical test suite",
     "jackson_network": "Jackson 排队网络",
     "multi_echelon_inventory": "多级库存策略",
     "bullwhip_effect": "牛鞭效应分析",
@@ -210,6 +241,7 @@ EXECUTABLE_MODEL_LABELS = {
     "ridge_regression": "岭回归交叉验证预测",
     "bernoulli_flow": "Bernoulli 流体能量分析",
     "community_detection": "贪心模块度社区发现",
+    "independent_cascade": "Independent cascade propagation simulation",
     "friend_recommendation": "Campus friend recommendation",
     "information_propagation": "Campus information propagation",
     "influence_maximization": "Campus influence maximization",
@@ -414,6 +446,7 @@ MODEL_APPLICABILITY: dict[str, ApplicabilityRule] = {
     "nonlinear_optimization": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, needs_objective_or_constraint=True, role="comparison", tier="improved", validation="check convergence from multiple starts", not_recommended_when=("problem is convex and linear methods suffice", "many local optima without global solver"), innovation_extensions=("global_optimization", "surrogate_model")),
     "integer_programming": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, needs_objective_or_constraint=True, role="comparison", tier="improved", validation="check integrality and feasibility", not_recommended_when=("continuous relaxation gives good enough answer", "problem too large for exact solver"), innovation_extensions=("branch_and_cut", "lagrangian_relaxation")),
     "multiobjective_optimization": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, needs_objective_or_constraint=True, role="comparison", tier="innovation", validation="inspect Pareto tradeoffs", not_recommended_when=("objectives can be merged into single", "decision maker has clear preference"), innovation_extensions=("nsga2_genetic", "interactive_method")),
+    "dynamic_programming_plan": ApplicabilityRule(("optimization",), min_rows=2, min_numeric_cols=2, needs_objective_or_constraint=True, role="primary", tier="improved", validation="check Bellman recursion and capacity feasibility", not_recommended_when=("state space is too large", "future decisions are independent"), innovation_extensions=("stochastic_dynamic_programming", "rolling_horizon_dp")),
     # Classification
     "logistic_classifier": ApplicabilityRule(("classification",), min_rows=8, min_numeric_cols=1, needs_label=True, role="primary", tier="baseline", validation="check accuracy, recall, and confusion matrix", not_recommended_when=("nonlinear decision boundary", "high-dimensional sparse features"), innovation_extensions=("regularized_logistic", "ordinal_logistic")),
     "naive_bayes_classifier": ApplicabilityRule(("classification",), min_rows=8, min_numeric_cols=1, needs_label=True, role="comparison", tier="baseline", validation="compare classification metrics", not_recommended_when=("features are highly correlated", "continuous features not normal"), innovation_extensions=("gaussian_nb", "complement_nb")),
@@ -432,6 +465,7 @@ MODEL_APPLICABILITY: dict[str, ApplicabilityRule] = {
     "graph_max_flow": ApplicabilityRule(("network", "optimization"), min_rows=2, needs_relation=True, role="comparison", tier="baseline", validation="check capacity conservation", not_recommended_when=("multi-commodity flow", "node capacities dominate"), innovation_extensions=("min_cost_flow", "multi_commodity_flow")),
     "graph_centrality": ApplicabilityRule(("network",), min_rows=2, needs_relation=True, role="primary", tier="baseline", validation="interpret centrality ranking", not_recommended_when=("disconnected graph", "need dynamic centrality"), innovation_extensions=("pagerank", "eigenvector_centrality")),
     "community_detection": ApplicabilityRule(("network", "clustering"), min_rows=2, needs_relation=True, role="primary", tier="improved", validation="check modularity and community size", not_recommended_when=("overlapping communities needed", "network is too small <10 nodes"), innovation_extensions=("overlapping_community", "label_propagation")),
+    "independent_cascade": ApplicabilityRule(("network", "simulation"), min_rows=2, needs_relation=True, role="primary", tier="improved", validation="check activated-node curve and seed sensitivity", not_recommended_when=("network has no propagation interpretation", "edge probabilities cannot be justified"), innovation_extensions=("time_aware_ic_model", "topic_sensitive_diffusion")),
     "friend_recommendation": ApplicabilityRule(("network", "forecast"), min_rows=2, needs_relation=True, role="primary", tier="improved", validation="compare link-prediction scores and inspect top recommendations", not_recommended_when=("no friend edge list", "target user cannot be identified"), innovation_extensions=("supervised_link_prediction", "embedding_similarity")),
     "information_propagation": ApplicabilityRule(("network", "simulation"), min_rows=2, needs_relation=True, role="primary", tier="improved", validation="run repeated diffusion simulations and compare key-user rankings", not_recommended_when=("network is too sparse", "no propagation assumptions can be justified"), innovation_extensions=("time_aware_ic_model", "topic_sensitive_diffusion")),
     "influence_maximization": ApplicabilityRule(("network", "optimization"), min_rows=2, needs_relation=True, role="primary", tier="innovation", validation="compare greedy seeds with degree, PageRank, and random baselines", not_recommended_when=("push quota is undefined", "network is too small for seed selection"), innovation_extensions=("budgeted_influence_maximization", "community_diverse_seeding")),
@@ -443,6 +477,7 @@ MODEL_APPLICABILITY: dict[str, ApplicabilityRule] = {
     "linear_regression": ApplicabilityRule(("statistics", "forecast"), min_rows=4, min_numeric_cols=2, needs_target=True, role="comparison", tier="baseline", validation="check R2, residuals, and collinearity", not_recommended_when=("nonlinear relationship", "heteroscedasticity severe"), innovation_extensions=("robust_regression", "quantile_regression")),
     "parameter_estimation": ApplicabilityRule(("statistics",), min_rows=3, min_numeric_cols=1, role="validation", tier="baseline", validation="report confidence intervals", not_recommended_when=("distribution is unknown", "sample too small for asymptotic normality"), innovation_extensions=("bootstrap_ci", "bayesian_estimation")),
     "hypothesis_tests": ApplicabilityRule(("statistics",), min_rows=4, min_numeric_cols=1, role="validation", tier="baseline", validation="report p-value and effect size", not_recommended_when=("multiple testing without correction", "distribution assumptions violated"), innovation_extensions=("permutation_test", "bootstrap_test")),
+    "statistical_test_suite": ApplicabilityRule(("statistics",), min_rows=4, min_numeric_cols=1, role="validation", tier="improved", validation="report p-value, effect size, normality, and multiple-testing caveats", not_recommended_when=("sample size is too small for asymptotic approximations", "tests are used as causal proof"), innovation_extensions=("permutation_test", "bootstrap_test", "fdr_control")),
     "anova_analysis": ApplicabilityRule(("statistics",), min_rows=4, min_numeric_cols=1, min_categorical_cols=1, role="validation", tier="improved", validation="check group sizes", not_recommended_when=("groups are unbalanced and small", "normality assumption violated"), innovation_extensions=("welch_anova", "kruskal_wallis")),
     "quality_sampling_plan": ApplicabilityRule(("statistics", "evaluation"), min_rows=1, min_numeric_cols=1, role="primary", tier="improved", validation="check binomial confidence level and accept/reject thresholds", not_recommended_when=("defects are not Bernoulli trials", "sampling is destructive with variable cost per item"), innovation_extensions=("sequential_sampling", "bayesian_acceptance_sampling")),
     "nipt_bmi_grouping": ApplicabilityRule(("statistics", "optimization", "classification"), min_rows=3, min_numeric_cols=1, role="primary", tier="improved", validation="check BMI group stability and Y-concentration threshold reach rate", not_recommended_when=("BMI field is missing", "gestational week and Y concentration are both missing"), innovation_extensions=("survival_time_to_threshold", "risk_constrained_grouping")),

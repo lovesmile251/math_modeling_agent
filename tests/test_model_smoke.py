@@ -58,6 +58,7 @@ def _build_model_mapping():
 
     from models.optimization.advanced import (
         astar_path_plan,
+        dynamic_programming_plan,
         integer_branch_bound,
         multiobjective_weighted_sum,
         nonlinear_gradient_optimization,
@@ -67,6 +68,7 @@ def _build_model_mapping():
     mapping["nonlinear_optimization"] = (nonlinear_gradient_optimization, False, False, False)
     mapping["integer_programming"] = (integer_branch_bound, False, False, False)
     mapping["multiobjective_optimization"] = (multiobjective_weighted_sum, False, False, False)
+    mapping["dynamic_programming_plan"] = (dynamic_programming_plan, False, False, False)
     mapping["astar_path"] = (astar_path_plan, False, False, False)
     mapping["tsp_route"] = (tsp_route_heuristic, False, False, False)
     mapping["vrp_route"] = (vrp_savings_heuristic, False, False, False)
@@ -129,8 +131,9 @@ def _build_model_mapping():
     from models.statistics.estimation import parameter_estimation
     mapping["parameter_estimation"] = (parameter_estimation, False, False, False)
 
-    from models.statistics.hypothesis import hypothesis_tests
+    from models.statistics.hypothesis import hypothesis_tests, statistical_test_suite
     mapping["hypothesis_tests"] = (hypothesis_tests, False, False, False)
+    mapping["statistical_test_suite"] = (statistical_test_suite, False, False, False)
 
     from models.statistics.anova import anova_analysis
     mapping["anova_analysis"] = (anova_analysis, False, False, False)
@@ -145,12 +148,20 @@ def _build_model_mapping():
     mapping["monte_carlo"] = (monte_carlo_simulation, False, False, False)
 
     # -- graph / network ----------------------------------------------------
-    from models.graph.network import community_detection, graph_centrality, graph_max_flow, graph_mst, graph_shortest_paths
+    from models.graph.network import (
+        community_detection,
+        graph_centrality,
+        graph_max_flow,
+        graph_mst,
+        graph_shortest_paths,
+        independent_cascade_simulation,
+    )
     mapping["graph_shortest_paths"] = (graph_shortest_paths, False, False, False)
     mapping["graph_mst"] = (graph_mst, False, False, False)
     mapping["graph_max_flow"] = (graph_max_flow, False, False, False)
     mapping["graph_centrality"] = (graph_centrality, False, False, False)
     mapping["community_detection"] = (community_detection, False, False, False)
+    mapping["independent_cascade"] = (independent_cascade_simulation, False, False, False)
 
     from models.social_network.campus import (
         campus_friend_recommendation_model,
@@ -289,7 +300,7 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
     if model_id in ("resource_allocation", "knapsack_01", "assignment_plan",
                     "bin_packing", "scheduling_plan",
                     "nonlinear_optimization", "integer_programming",
-                    "multiobjective_optimization"):
+                    "multiobjective_optimization", "dynamic_programming_plan"):
         return pd.DataFrame({
             "cost": rng.integers(10, 100, 10).astype(float),
             "benefit": rng.integers(20, 200, 10).astype(float),
@@ -340,7 +351,7 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
 
     if model_id in ("graph_shortest_paths", "graph_mst", "graph_max_flow",
                     "graph_centrality", "community_detection",
-                    "astar_path", "tsp_route", "vrp_route"):
+                    "independent_cascade", "astar_path", "tsp_route", "vrp_route"):
         return pd.DataFrame({
             "source": [f"node{i}" for i in range(10)],
             "target": [f"node{(i + 3) % 10}" for i in range(10)],

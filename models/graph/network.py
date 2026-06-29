@@ -193,6 +193,72 @@ def community_detection(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values(["community", "node"]).reset_index(drop=True)
 
 
+def independent_cascade_simulation(df: pd.DataFrame) -> pd.DataFrame:
+    """Deterministic independent-cascade-style propagation summary."""
+
+    edge_data = _extract_edges(df)
+    if edge_data.empty:
+        return pd.DataFrame()
+    nodes = sorted(set(edge_data["source"]) | set(edge_data["target"]))
+    adjacency: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for _, row in edge_data.iterrows():
+        probability = float(row["weight"])
+        if probability > 1.0:
+            probability = 1.0 / (1.0 + math.exp(-probability))
+        probability = max(0.01, min(0.95, probability))
+        adjacency[str(row["source"])].append((str(row["target"]), probability))
+        adjacency[str(row["target"])].append((str(row["source"]), probability))
+
+    seed_count = max(1, min(3, int(round(math.sqrt(len(nodes))))))
+    seeds = sorted(nodes, key=lambda node: len(adjacency[node]), reverse=True)[:seed_count]
+    active = set(seeds)
+    frontier = set(seeds)
+    rows = []
+    cumulative_probability = {seed: 1.0 for seed in seeds}
+    for step in range(1, min(len(nodes), 12) + 1):
+        next_frontier: set[str] = set()
+        for node in sorted(frontier):
+            for neighbor, probability in adjacency[node]:
+                if neighbor in active:
+                    continue
+                inherited = cumulative_probability.get(node, 1.0) * probability
+                current = cumulative_probability.get(neighbor, 0.0)
+                if inherited > current:
+                    cumulative_probability[neighbor] = inherited
+                if inherited >= 0.05:
+                    next_frontier.add(neighbor)
+        active.update(next_frontier)
+        rows.append(
+            {
+                "step": step,
+                "newly_activated": len(next_frontier),
+                "active_count": len(active),
+                "activation_rate": len(active) / len(nodes),
+                "seed_nodes": ",".join(seeds),
+                "frontier_nodes": ",".join(sorted(next_frontier)[:20]),
+                "method": "deterministic_independent_cascade",
+            }
+        )
+        if not next_frontier:
+            break
+        frontier = next_frontier
+
+    influence_rows = [
+        {
+            "step": 0,
+            "newly_activated": 1,
+            "active_count": len(active),
+            "activation_rate": len(active) / len(nodes),
+            "seed_nodes": node,
+            "frontier_nodes": node,
+            "method": "seed_influence_score",
+            "influence_score": len(adjacency[node]) + sum(prob for _neighbor, prob in adjacency[node]),
+        }
+        for node in seeds
+    ]
+    return pd.DataFrame([*influence_rows, *rows])
+
+
 def _extract_edges(df: pd.DataFrame, capacity_mode: bool = False) -> pd.DataFrame:
     source_col = _find_column(df, ("source", "from", "start", "origin", "起点", "源"))
     target_col = _find_column(df, ("target", "to", "end", "dest", "destination", "终点", "汇"))

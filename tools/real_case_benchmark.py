@@ -16,6 +16,9 @@ class RealCaseGold:
     case_id: str
     expected_task_types: tuple[str, ...]
     acceptable_primary_models: tuple[str, ...]
+    expected_numeric_ranges: tuple[dict[str, Any], ...] = ()
+    expected_decisions: tuple[dict[str, Any], ...] = ()
+    hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,8 @@ class RealCaseScore:
     expected_tasks: tuple[str, ...]
     actual_tasks: tuple[str, ...]
     selected_models: tuple[str, ...]
+    hidden: bool = False
+    answer_expectation_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -40,8 +45,25 @@ def load_real_case_gold(path: Path) -> list[RealCaseGold]:
             case_id=str(item["case_id"]),
             expected_task_types=tuple(item["expected_task_types"]),
             acceptable_primary_models=tuple(item["acceptable_primary_models"]),
+            expected_numeric_ranges=tuple(item.get("expected_numeric_ranges", ())),
+            expected_decisions=tuple(item.get("expected_decisions", ())),
+            hidden=bool(item.get("hidden", False)),
         )
         for item in payload
+    ]
+
+
+def mark_real_case_gold_hidden(gold_cases: list[RealCaseGold]) -> list[RealCaseGold]:
+    return [
+        RealCaseGold(
+            case_id=gold.case_id,
+            expected_task_types=gold.expected_task_types,
+            acceptable_primary_models=gold.acceptable_primary_models,
+            expected_numeric_ranges=gold.expected_numeric_ranges,
+            expected_decisions=gold.expected_decisions,
+            hidden=True,
+        )
+        for gold in gold_cases
     ]
 
 
@@ -84,6 +106,8 @@ def evaluate_real_case(
         expected_tasks=gold.expected_task_types,
         actual_tasks=actual_tasks,
         selected_models=selected_models,
+        hidden=gold.hidden,
+        answer_expectation_count=len(gold.expected_numeric_ranges) + len(gold.expected_decisions),
     )
 
 

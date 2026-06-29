@@ -4,7 +4,7 @@ import argparse
 import importlib.util
 import json
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from agents.base import (
     K_EXECUTION_ATTEMPTS,
     K_EXECUTION_STATUS,
     K_PAPER_QUALITY_SCORE,
+    QUALITY_GATE_NOTE_KEYS,
 )
 from agents.execution_agent import ExecutionAgent
 from app.config import PROJECT_ROOT, WorkspaceConfig
@@ -61,6 +62,7 @@ class RealCaseDrillResult:
     error_count: int
     artifacts: dict[str, str]
     score: float
+    quality_gates: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -166,6 +168,7 @@ def run_single_case_drill(
         error_count=len(state.errors),
         artifacts=artifacts,
         score=0.0,
+        quality_gates=_extract_quality_gates(state.notes),
     )
     return _with_score(result)
 
@@ -218,6 +221,7 @@ def _failed_case_result(case: CorpusCase, runs_root: Path, exc: Exception) -> Re
         error_count=1,
         artifacts={"error": f"{type(exc).__name__}: {exc}"},
         score=0.0,
+        quality_gates={},
     )
 
 
@@ -329,6 +333,21 @@ def _load_model_feedback(path: Path) -> dict[str, list[str]]:
     return parsed
 
 
+def _extract_quality_gates(notes: dict[str, str]) -> dict[str, str]:
+    return {
+        key: str(notes[key])
+        for key in QUALITY_GATE_NOTE_KEYS
+        if notes.get(key)
+    }
+
+
+def _gate_score(gates: dict[str, str]) -> float:
+    if not gates:
+        return 0.5
+    failed = sum(str(value).lower() in {"failed", "blocked"} for value in gates.values())
+    return max(0.0, 1.0 - failed / max(len(gates), 1))
+
+
 def _with_score(result: RealCaseDrillResult) -> RealCaseDrillResult:
     model_total = (
         len(result.produced_models)
@@ -346,11 +365,12 @@ def _with_score(result: RealCaseDrillResult) -> RealCaseDrillResult:
         ]
     ) / 5
     score = (
-        25 * (result.execution_status == "success")
-        + 20 * artifact_score
+        20 * (result.execution_status == "success")
+        + 15 * artifact_score
         + 20 * model_coverage
         + 25 * min(max(result.paper_quality_score, 0), 100) / 100
         + 10 * (result.error_count == 0)
+        + 10 * _gate_score(result.quality_gates)
     )
     return RealCaseDrillResult(
         **{**result.to_dict(), "score": round(score, 2)}

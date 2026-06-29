@@ -70,6 +70,7 @@ def build_experiment_report(
         plan,
         decision,
     )
+    report["strong_baseline_audit"] = audit_strong_baseline_evidence(report)
     report_path = write_text(
         workspace.logs_dir / "experiment_report.json",
         json.dumps(report, ensure_ascii=False, indent=2),
@@ -192,3 +193,65 @@ def _quality_gate(rows: list[dict[str, Any]], decision: ModelDecision) -> dict[s
         if row["status"] == "success" and row["table_rows"] == 0:
             issues.append(f"{row['model_id']} succeeded without a non-empty result table")
     return {"passed": not issues, "issues": issues}
+
+
+def audit_strong_baseline_evidence(report: dict[str, Any]) -> dict[str, Any]:
+    """Audit whether the run has baseline comparison, validation, and ablation evidence."""
+
+    models = report.get("models") if isinstance(report.get("models"), list) else []
+    by_role = {
+        str(row.get("role")): row
+        for row in models
+        if isinstance(row, dict) and row.get("role")
+    }
+    issues: list[str] = []
+    evidence: dict[str, Any] = {}
+
+    primary = by_role.get("primary")
+    baseline = by_role.get("baseline")
+    if not primary:
+        issues.append("missing primary model row in experiment comparison")
+    elif primary.get("status") != "success" or int(primary.get("table_rows") or 0) <= 0:
+        issues.append("primary model lacks a successful non-empty result table")
+    if not baseline:
+        issues.append("missing baseline model row in experiment comparison")
+    elif baseline.get("status") != "success" or int(baseline.get("table_rows") or 0) <= 0:
+        issues.append("baseline model lacks a successful non-empty result table")
+
+    comparison_table = str(report.get("comparison_table") or "")
+    evidence["comparison_table"] = comparison_table
+    if not comparison_table:
+        issues.append("missing model experiment comparison table")
+
+    executed = report.get("executed_validation")
+    executed = executed if isinstance(executed, dict) else {}
+    evidence["executed_validation"] = executed
+    validation_keys = {
+        key
+        for key, value in executed.items()
+        if key in {"rolling_backtest", "robustness", "ablation"}
+        and value
+    }
+    if not validation_keys:
+        issues.append("missing executed validation evidence")
+    if "ablation" not in validation_keys:
+        issues.append("missing feature ablation evidence")
+    if not ({"rolling_backtest", "robustness"} & validation_keys):
+        issues.append("missing strong baseline validation evidence")
+
+    gate = report.get("gate") if isinstance(report.get("gate"), dict) else {}
+    if gate.get("passed") is False:
+        issues.extend(str(item) for item in gate.get("issues", []) if str(item))
+
+    return {
+        "passed": not issues,
+        "issues": list(dict.fromkeys(issues)),
+        "evidence": evidence,
+        "required": [
+            "successful primary model",
+            "successful baseline model",
+            "model experiment comparison table",
+            "rolling backtest or perturbation robustness",
+            "feature ablation",
+        ],
+    }

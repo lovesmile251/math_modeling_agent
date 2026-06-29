@@ -300,6 +300,94 @@ def vrp_savings_heuristic(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def dynamic_programming_plan(df: pd.DataFrame) -> pd.DataFrame:
+    """Solve a small staged resource-allocation problem with dynamic programming."""
+
+    numeric = df.select_dtypes(include="number").dropna(axis=1, how="all")
+    if numeric.shape[0] < 2 or numeric.shape[1] < 2:
+        return pd.DataFrame()
+
+    stage_col = _find_column(df, ("stage", "period", "step", "time"))
+    resource_col = _find_column(numeric, ("resource", "capacity", "budget", "amount", "allocation"))
+    value_col = _find_column(numeric, BENEFIT_KEYWORDS + ("reward", "return", "utility"), exclude={resource_col})
+    if resource_col is None:
+        resource_col = str(numeric.columns[0])
+    if value_col is None:
+        candidates = [str(column) for column in numeric.columns if str(column) != resource_col]
+        if not candidates:
+            return pd.DataFrame()
+        value_col = candidates[-1]
+
+    work = pd.DataFrame(
+        {
+            "stage": df[stage_col].astype(str) if stage_col else [f"stage_{idx}" for idx in df.index],
+            "resource": pd.to_numeric(numeric[resource_col], errors="coerce"),
+            "value": pd.to_numeric(numeric[value_col], errors="coerce"),
+        }
+    ).dropna()
+    work = work[(work["resource"] >= 0) & (work["value"] >= 0)].reset_index(drop=True)
+    if work.empty:
+        return pd.DataFrame()
+
+    total_capacity_values = _numeric_column_values(df, ("total_capacity", "total_budget", "capacity_limit"))
+    if total_capacity_values.size:
+        total_capacity = int(max(1, round(float(total_capacity_values[0]))))
+    else:
+        total_capacity = int(max(1, round(float(work["resource"].sum() * 0.5))))
+    if total_capacity > 500:
+        scale = total_capacity / 500
+        work["resource"] = (work["resource"] / scale).round().clip(lower=0)
+        total_capacity = 500
+
+    costs = work["resource"].round().astype(int).to_numpy()
+    values = work["value"].to_numpy(dtype=float)
+    n = len(work)
+    dp = np.zeros((n + 1, total_capacity + 1), dtype=float)
+    take = np.zeros((n + 1, total_capacity + 1), dtype=bool)
+    for i in range(1, n + 1):
+        cost = int(costs[i - 1])
+        value = float(values[i - 1])
+        for capacity in range(total_capacity + 1):
+            best = dp[i - 1, capacity]
+            if cost <= capacity and dp[i - 1, capacity - cost] + value > best:
+                dp[i, capacity] = dp[i - 1, capacity - cost] + value
+                take[i, capacity] = True
+            else:
+                dp[i, capacity] = best
+
+    selected: list[int] = []
+    capacity = total_capacity
+    for i in range(n, 0, -1):
+        if take[i, capacity]:
+            selected.append(i - 1)
+            capacity -= int(costs[i - 1])
+    selected.reverse()
+    selected_set = set(selected)
+
+    rows = []
+    cumulative_resource = 0
+    cumulative_value = 0.0
+    for idx, row in work.iterrows():
+        is_selected = idx in selected_set
+        if is_selected:
+            cumulative_resource += int(costs[idx])
+            cumulative_value += float(values[idx])
+        rows.append(
+            {
+                "stage": row["stage"],
+                "selected": int(is_selected),
+                "resource": int(costs[idx]),
+                "value": float(values[idx]),
+                "total_capacity": int(total_capacity),
+                "cumulative_resource": int(cumulative_resource),
+                "cumulative_value": float(cumulative_value),
+                "optimal_value": float(dp[n, total_capacity]),
+                "method": "dynamic_programming_resource_allocation",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _find_column(df: pd.DataFrame, keywords: tuple[str, ...], exclude: set[str | None] | None = None) -> str | None:
     exclude = exclude or set()
     for column in df.columns:

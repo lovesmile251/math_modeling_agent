@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from agents.base import PaperOutline, PhaseStatus, ReviewFindings, WorkflowPhase, WorkflowState
 from app.streamlit_app import (
     _feedback_templates_for_phase,
@@ -8,6 +10,7 @@ from app.streamlit_app import (
     _phase_status_counts,
     _revision_target_options,
     _split_csv_items,
+    load_rework_dashboard_payload,
 )
 
 
@@ -51,3 +54,47 @@ def test_feedback_templates_and_csv_split_are_phase_aware():
     assert "强化结论证据" in templates
     assert _feedback_templates_for_phase(WorkflowPhase.PROBLEM_ANALYSIS) == {}
     assert _split_csv_items(" E1, ,E2,E3 ") == ["E1", "E2", "E3"]
+
+
+def test_rework_dashboard_payload_merges_report_and_gate_summary(temp_workspace):
+    (temp_workspace.logs_dir / "auto_rework_report.json").write_text(
+        json.dumps(
+            {
+                "status": "resolved",
+                "attempt": 1,
+                "max_attempts": 2,
+                "initial_route": {"target_phase": "section_writing", "reason": "quality gate failed"},
+                "before_gates": {"export_quality_gate": "failed"},
+                "after_gates": {"export_quality_gate": "passed"},
+                "after_blockers": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (temp_workspace.logs_dir / "workflow_gate_summary.json").write_text(
+        json.dumps(
+            {
+                "failed_gates": [],
+                "gates": {
+                    "export_quality_gate": "passed",
+                    "task_traceability_gate": "passed",
+                },
+                "auto_rework": {"status": "resolved", "attempts_used": "1"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_rework_dashboard_payload(temp_workspace)
+
+    assert payload["report"]["status"] == "resolved"
+    rows = {row["gate"]: row for row in payload["gate_change_rows"]}
+    assert rows["export_quality_gate"] == {
+        "gate": "export_quality_gate",
+        "before": "failed",
+        "after": "passed",
+        "current": "passed",
+    }
+    assert rows["task_traceability_gate"]["current"] == "passed"

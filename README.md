@@ -1,5 +1,7 @@
 # Math Modeling Agent
 
+National-award-paper optimization roadmap: [docs/national_award_agent_optimization.md](docs/national_award_agent_optimization.md).
+
 一个面向数学建模任务的 Python 工作流：从题目理解、模型选择、代码生成与执行，到结果分析、证据映射、论文写作、审稿和文档导出。
 
 项目既可以作为命令行工具一次性运行，也提供 Streamlit 分阶段工作台，允许用户在关键节点确认、修改或重新执行。

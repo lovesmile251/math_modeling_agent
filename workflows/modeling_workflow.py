@@ -8,13 +8,21 @@ from typing import Any, Callable
 
 from agents.analysis_agent import AnalysisAgent
 from agents.base import (
+    A_AUTO_REWORK_PLAN,
+    A_AUTO_REWORK_REPORT,
+    A_AUTO_REWORK_REPORT_MD,
     A_CODE,
+    A_WORKFLOW_GATE_SUMMARY,
+    A_WORKFLOW_GATE_SUMMARY_MD,
+    K_AUTO_REWORK_RERUN_FROM_PHASE,
+    K_AUTO_REWORK_STATUS,
     K_EXECUTION_STATUS,
     K_LLM_STATUS,
     K_LLM_FAILURE_KIND,
     K_PAPER_QUALITY_SCORE,
     K_PREWRITING_GATE_STATUS,
     K_REVIEW_REPORT,
+    K_SELECTED_MODEL_IDS,
     PhaseStatus,
     WorkflowPhase,
     WorkflowState,
@@ -42,9 +50,18 @@ from app.config import WORKSPACE
 from app.config import PROJECT_ROOT, WorkspaceConfig
 from tools.file_tool import discover_data_files, list_data_files, read_problem_file, write_text
 from tools.llm_client import build_llm_client
-from tools.model_ids import normalize_model_ids
+from tools.model_ids import normalize_model_decision, normalize_model_ids
 from tools.logging_setup import setup_logging
-from tools.rework_router import ReworkPlan, ReworkRoute, apply_rework_plan, build_rework_plan, write_rework_plan
+from tools.rework_router import (
+    ReworkPlan,
+    ReworkRoute,
+    apply_rework_plan,
+    build_auto_rework_report,
+    build_rework_plan,
+    write_auto_rework_report,
+    write_rework_plan,
+)
+from tools.gate_summary import write_workflow_gate_summary
 
 
 # ── phases that pause for user confirmation ──
@@ -142,6 +159,7 @@ class ModelingWorkflow:
         run_id: str | None = None,
         progress_callback: Callable[[str, str, WorkflowState | None], None] | None = None,
         pause_callback: Callable[[WorkflowPhase, WorkflowState], bool] | None = None,
+        auto_rework_attempts: int = 1,
     ) -> None:
         self.llm = build_llm_client(use_llm)
         self.skip_review = skip_review
@@ -149,6 +167,9 @@ class ModelingWorkflow:
         self.workspace = self._resolve_workspace(workspace, run_workspace, run_id)
         self.progress_callback = progress_callback
         self.pause_callback = pause_callback
+        self.auto_rework_attempts = max(0, int(auto_rework_attempts))
+        self._auto_rework_attempts_used = 0
+        self._auto_rework_failure_counts: dict[str, int] = {}
         # legacy flat agent list — kept for backward compat
         self.agents = [
             ProblemAgent(),
@@ -327,6 +348,9 @@ class ModelingWorkflow:
                 log.info("%s done in %.2fs", agent.name, state.durations[agent.name])
                 self._emit_progress(agent.name, progress_status, state)
 
+            if phase == WorkflowPhase.MODEL_DECISION:
+                self._sync_model_decision_state(state)
+
             state.set_phase_status(phase, PhaseStatus.COMPLETED)
 
             # checkpoint: pause for user confirmation
@@ -354,6 +378,9 @@ class ModelingWorkflow:
         if target_phase in (WorkflowPhase.COMPLETE, WorkflowPhase.LANGUAGE_REVIEW):
             state = self._retry_writing_review(state, log)
 
+        if target_phase == WorkflowPhase.COMPLETE:
+            state = self._maybe_auto_rework(state, log, auto_approve=auto_approve)
+
         # write diagnostics
         self._write_diagnostics(state, log)
         return state
@@ -366,6 +393,8 @@ class ModelingWorkflow:
 
         if edits:
             self._apply_edits(state, phase, edits)
+            if phase == WorkflowPhase.MODEL_DECISION:
+                self._sync_model_decision_state(state)
 
         state.set_phase_status(phase, PhaseStatus.APPROVED)
         state.record_decision(phase, "approved", operator="user", notes=str(edits or {}))
@@ -416,6 +445,83 @@ class ModelingWorkflow:
             write_rework_plan(self.workspace, plan)
             self._save_pause_state(self._state)
         return self._state
+
+    def _maybe_auto_rework(
+        self,
+        state: WorkflowState,
+        log,
+        *,
+        auto_approve: bool,
+    ) -> WorkflowState:
+        """Apply and execute one bounded automatic rework loop when safe."""
+
+        if self.auto_rework_attempts <= 0:
+            return state
+        if self._auto_rework_attempts_used >= self.auto_rework_attempts:
+            return state
+
+        plan = build_rework_plan(state)
+        if plan is None or not plan.can_auto_apply:
+            return state
+        rework_signature = _rework_failure_signature(plan)
+        if self._auto_rework_failure_counts.get(rework_signature, 0) > 0:
+            state.notes[K_AUTO_REWORK_STATUS] = "fused_same_cause"
+            state.notes["auto_rework_fuse_reason"] = plan.route.reason
+            state.notes["auto_rework_fuse_signature"] = rework_signature
+            return state
+
+        self._auto_rework_attempts_used += 1
+        self._auto_rework_failure_counts[rework_signature] = (
+            self._auto_rework_failure_counts.get(rework_signature, 0) + 1
+        )
+        attempt = self._auto_rework_attempts_used
+        state.notes["auto_rework_attempts_used"] = str(attempt)
+        state.notes["auto_rework_last_reason"] = plan.route.reason
+        state.notes["auto_rework_last_signature"] = rework_signature
+        state.notes[K_AUTO_REWORK_STATUS] = "running"
+        state.artifacts[A_AUTO_REWORK_PLAN] = write_rework_plan(self.workspace, plan)
+        before_notes = dict(state.notes)
+        log.info(
+            "Auto rework attempt %d/%d from %s: %s",
+            attempt,
+            self.auto_rework_attempts,
+            plan.rerun_from_phase.value,
+            plan.route.reason,
+        )
+
+        apply_result = apply_rework_plan(state, plan, clear_artifacts=False, operator="auto")
+        self._paused_at = None
+        self._state = state
+        rerun_state = self.run_until(
+            WorkflowPhase.COMPLETE,
+            auto_approve=auto_approve,
+        )
+        final_plan = build_rework_plan(rerun_state)
+        if final_plan is None:
+            status = "resolved"
+        elif _rework_failure_signature(final_plan) == rework_signature:
+            status = "fused_same_cause"
+            rerun_state.notes["auto_rework_fuse_reason"] = final_plan.route.reason
+            rerun_state.notes["auto_rework_fuse_signature"] = rework_signature
+        else:
+            status = "remaining_blockers"
+        rerun_state.notes[K_AUTO_REWORK_STATUS] = status
+        if final_plan is not None:
+            rerun_state.notes["auto_rework_remaining_reason"] = final_plan.route.reason
+        report = build_auto_rework_report(
+            plan=plan,
+            apply_result=apply_result,
+            final_plan=final_plan,
+            before_notes=before_notes,
+            after_notes=dict(rerun_state.notes),
+            attempt=attempt,
+            max_attempts=self.auto_rework_attempts,
+            status=status,
+        )
+        report_paths = write_auto_rework_report(self.workspace, report)
+        rerun_state.artifacts[A_AUTO_REWORK_REPORT] = report_paths["json"]
+        rerun_state.artifacts[A_AUTO_REWORK_REPORT_MD] = report_paths["markdown"]
+        return rerun_state
 
     def revise_artifact(self, artifact_name: str, feedback: str) -> WorkflowState:
         """Locally revise a single artifact based on feedback.
@@ -564,6 +670,26 @@ class ModelingWorkflow:
             if isinstance(value, str):
                 state.notes[f"user_edit_{key}"] = value
 
+    def _sync_model_decision_state(self, state: WorkflowState) -> None:
+        """Keep decision fields and selected_model_ids notes executable."""
+        if state.model_decision is None:
+            return
+        decision = state.model_decision
+        normalized = normalize_model_decision(
+            selected_model_ids=decision.selected_model_ids,
+            primary_model_id=decision.primary_model_id,
+            baseline_model_id=decision.baseline_model_id,
+        )
+        decision.selected_model_ids = normalized.selected
+        decision.primary_model_id = normalized.primary
+        decision.baseline_model_id = normalized.baseline
+        state.notes[K_SELECTED_MODEL_IDS] = json.dumps(normalized.selected, ensure_ascii=False)
+        if normalized.dropped:
+            state.notes["workflow_dropped_model_ids"] = json.dumps(
+                normalized.dropped,
+                ensure_ascii=False,
+            )
+
     def _save_pause_state(self, state: WorkflowState) -> None:
         """Persist state so the UI can reload it."""
         try:
@@ -590,8 +716,11 @@ class ModelingWorkflow:
             state.notes["auto_rework_target_phase"] = route.target_phase.value
             state.notes["auto_rework_reason"] = route.reason
             state.notes["auto_rework_severity"] = route.severity
-            state.notes["auto_rework_rerun_from_phase"] = rework_plan.rerun_from_phase.value
-            state.artifacts["auto_rework_plan"] = write_rework_plan(self.workspace, rework_plan)
+            state.notes[K_AUTO_REWORK_RERUN_FROM_PHASE] = rework_plan.rerun_from_phase.value
+            state.artifacts[A_AUTO_REWORK_PLAN] = write_rework_plan(self.workspace, rework_plan)
+        gate_summary_paths = write_workflow_gate_summary(state)
+        state.artifacts[A_WORKFLOW_GATE_SUMMARY] = gate_summary_paths["json"]
+        state.artifacts[A_WORKFLOW_GATE_SUMMARY_MD] = gate_summary_paths["markdown"]
         diag = {
             "errors": state.errors,
             "durations_s": state.durations,
@@ -726,6 +855,17 @@ def _looks_like_non_retryable_llm_error(text: str) -> bool:
             "402",
             "unauthorized",
             "invalid api key",
+        )
+    )
+
+
+def _rework_failure_signature(plan: ReworkPlan) -> str:
+    route = plan.route
+    return "|".join(
+        (
+            route.target_phase.value,
+            route.severity,
+            route.reason,
         )
     )
 

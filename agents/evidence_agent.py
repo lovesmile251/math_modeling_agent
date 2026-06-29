@@ -7,13 +7,19 @@ import re
 from pathlib import Path
 
 from agents.base import (
+    A_CLAIM_EVIDENCE_MAP,
+    A_RESULT_REGISTRY,
+    A_TASK_TRACEABILITY_REPORT,
     Agent,
     ClaimEvidence,
     ClaimEvidenceMap,
+    K_TASK_TRACEABILITY_COVERAGE_PCT,
+    K_TASK_TRACEABILITY_GATE,
     ResultRegistry,
     WorkflowState,
 )
 from tools.file_tool import write_text
+from tools.task_traceability import build_task_traceability_report, write_task_traceability_report
 
 log = logging.getLogger("mma.evidence_agent")
 
@@ -51,7 +57,7 @@ class EvidenceAgent(Agent):
                 indent=2,
             ),
         )
-        state.artifacts["result_registry"] = registry_path
+        state.artifacts[A_RESULT_REGISTRY] = registry_path
 
         # 2. Extract claims from result files
         claim_map = self._build_claim_map(state, registry)
@@ -60,7 +66,19 @@ class EvidenceAgent(Agent):
             state.workspace.logs_dir / "claim_evidence_map.json",
             self._claim_map_to_json(claim_map),
         )
-        state.artifacts["claim_evidence_map"] = claim_path
+        state.artifacts[A_CLAIM_EVIDENCE_MAP] = claim_path
+
+        task_traceability = build_task_traceability_report(
+            deliverables=state.task_deliverable_specs,
+            formulation=state.formulation_spec,
+            registry=registry,
+        )
+        state.artifacts[A_TASK_TRACEABILITY_REPORT] = write_task_traceability_report(
+            state.workspace,
+            task_traceability,
+        )
+        state.notes[K_TASK_TRACEABILITY_GATE] = "passed" if task_traceability["passed"] else "failed"
+        state.notes[K_TASK_TRACEABILITY_COVERAGE_PCT] = str(task_traceability["coverage_pct"])
 
         log.info("EvidenceAgent: %d results, %d claims mapped (%.0f%% coverage)",
                  len(registry.entries), len(claim_map.claims), claim_map.coverage_pct)
@@ -83,6 +101,7 @@ class EvidenceAgent(Agent):
                     "type": "table",
                     "name": table_path.stem,
                     "path": str(table_path),
+                    "model_id": self._guess_model_id(table_path.stem),
                     "rows": len(df),
                     "columns": list(df.columns),
                     "numeric_columns": list(df.select_dtypes(include="number").columns),

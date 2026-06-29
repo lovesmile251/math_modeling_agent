@@ -677,6 +677,94 @@ def tab_review(workspace) -> None:
         st.markdown(review_path.read_text(encoding="utf-8"))
     else:
         st.info("尚未生成审稿报告。")
+    render_auto_rework_panel(workspace)
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _gate_change_rows(report: dict[str, Any], gate_summary: dict[str, Any]) -> list[dict[str, str]]:
+    before = report.get("before_gates") if isinstance(report.get("before_gates"), dict) else {}
+    after = report.get("after_gates") if isinstance(report.get("after_gates"), dict) else {}
+    current = gate_summary.get("gates") if isinstance(gate_summary.get("gates"), dict) else {}
+    rows: list[dict[str, str]] = []
+    for key in sorted(set(before) | set(after) | set(current)):
+        rows.append(
+            {
+                "gate": str(key),
+                "before": str(before.get(key, "")),
+                "after": str(after.get(key, "")),
+                "current": str(current.get(key, "")),
+            }
+        )
+    return rows
+
+
+def load_rework_dashboard_payload(workspace) -> dict[str, Any]:
+    workspace_logs_dir = getattr(workspace, "logs_dir", None)
+    logs_dir = Path(workspace_logs_dir) if workspace_logs_dir is not None else Path(workspace) / "logs"
+    report = _read_json_object(logs_dir / "auto_rework_report.json")
+    plan = _read_json_object(logs_dir / "auto_rework_plan.json")
+    gate_summary = _read_json_object(logs_dir / "workflow_gate_summary.json")
+    return {
+        "report": report,
+        "plan": plan,
+        "gate_summary": gate_summary,
+        "gate_change_rows": _gate_change_rows(report, gate_summary),
+        "report_markdown": logs_dir / "auto_rework_report.md",
+        "gate_summary_markdown": logs_dir / "workflow_gate_summary.md",
+    }
+
+
+def render_auto_rework_panel(workspace) -> None:
+    payload = load_rework_dashboard_payload(workspace)
+    report = payload["report"]
+    gate_summary = payload["gate_summary"]
+    plan = payload["plan"]
+    if not report and not gate_summary and not plan:
+        return
+
+    st.divider()
+    st.subheader("Auto rework and gates")
+
+    auto = gate_summary.get("auto_rework") if isinstance(gate_summary.get("auto_rework"), dict) else {}
+    route = report.get("initial_route") if isinstance(report.get("initial_route"), dict) else {}
+    cols = st.columns(4)
+    cols[0].metric("Status", report.get("status") or auto.get("status") or "not_run")
+    cols[1].metric("Attempts", f"{report.get('attempt', 0)}/{report.get('max_attempts', 0)}")
+    cols[2].metric("Failed gates", len(gate_summary.get("failed_gates", []) or []))
+    cols[3].metric("Target phase", route.get("target_phase") or "")
+
+    if route:
+        st.caption(f"Reason: {route.get('reason', '')}")
+    if report.get("remaining_route"):
+        remaining = report["remaining_route"]
+        st.warning(f"Remaining rework: {remaining.get('target_phase', '')} - {remaining.get('reason', '')}")
+
+    rows = payload["gate_change_rows"]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    blockers = gate_summary.get("blockers") if isinstance(gate_summary.get("blockers"), dict) else {}
+    after_blockers = report.get("after_blockers") if isinstance(report.get("after_blockers"), dict) else {}
+    if blockers or after_blockers:
+        with st.expander("Blocking issues", expanded=False):
+            st.json(after_blockers or blockers)
+
+    for label, path in (
+        ("Auto rework report", payload["report_markdown"]),
+        ("Workflow gate summary", payload["gate_summary_markdown"]),
+    ):
+        if path.exists():
+            with st.expander(label, expanded=False):
+                st.markdown(path.read_text(encoding="utf-8"))
 
 
 def tab_export_page(formats: list[str], workspace, key_prefix: str = "export") -> None:

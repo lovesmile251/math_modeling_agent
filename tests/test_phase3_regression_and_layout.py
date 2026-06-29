@@ -76,6 +76,56 @@ def test_rework_router_sends_prewriting_block_to_result_or_model_phase(temp_work
     assert route.target_phase.value == "model_decision"
 
 
+def test_rework_router_sends_strong_baseline_failure_to_experiment_plan(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["strong_baseline_gate"] = "failed"
+    state.notes["strong_baseline_issues"] = "missing executed validation evidence"
+
+    plan = build_rework_plan(state)
+
+    assert plan is not None
+    assert plan.rerun_from_phase == WorkflowPhase.EXPERIMENT_PLAN
+    assert "experiment_report" in plan.refresh_artifacts
+    assert plan.can_auto_apply is True
+
+
+def test_rework_router_sends_innovation_failure_to_experiment_plan(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["innovation_evidence_gate"] = "failed"
+    state.notes["innovation_evidence_issues"] = "stacking_ensemble: unsupported innovation claim"
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.EXPERIMENT_PLAN
+    assert route.severity == "high"
+
+
+def test_rework_router_sends_task_traceability_gaps_to_root_phase(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["task_traceability_gate"] = "failed"
+    state.notes["task_traceability_blocking_issues"] = "Q1: missing executable model binding"
+    assert recommend_rework_route(state).target_phase == WorkflowPhase.MODEL_DECISION
+
+    state.notes["task_traceability_blocking_issues"] = "Q1: missing result table binding"
+    assert recommend_rework_route(state).target_phase == WorkflowPhase.EVIDENCE_MAPPING
+
+    state.notes["task_traceability_blocking_issues"] = "Q1: missing paper section binding"
+    assert recommend_rework_route(state).target_phase == WorkflowPhase.SECTION_WRITING
+
+
+def test_rework_router_sends_export_quality_failure_to_section_writing(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["export_quality_gate"] = "failed"
+    state.notes["export_blocking_issues"] = "Submission blocker phrases remain in paper"
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.SECTION_WRITING
+    assert route.severity == "high"
+
+
 def test_pdf_render_layout_check_creates_screenshots(tmp_path):
     pdf = export_pdf(
         Document(title="layout", blocks=[Paragraph(text="正文包含足够内容用于渲染检查。")]),
@@ -295,6 +345,68 @@ def test_real_case_regression_runner_executes_tiny_quality_case(tmp_path):
     assert summary["requested_cases"] == 1
     assert summary["case_count"] == 1
     assert summary["scores"][0]["candidate_hit"] is True
+
+
+def test_real_case_regression_supports_redacted_hidden_gold(tmp_path):
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    (corpus_root / "hidden.txt").write_text(
+        "crop planting farmland acreage yield price cost demand optimization strategy",
+        encoding="utf-8",
+    )
+    corpus_index = tmp_path / "corpus.json"
+    public_gold = tmp_path / "gold.json"
+    hidden_gold = tmp_path / "hidden_gold.json"
+    corpus_index.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "hidden-case-a",
+                    "year": 2024,
+                    "problem": "C",
+                    "title": "hidden crop planting",
+                    "statement_path": "hidden.txt",
+                    "attachment_paths": [],
+                    "statement_chars": 70,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    public_gold.write_text("[]", encoding="utf-8")
+    hidden_gold.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "hidden-case-a",
+                    "expected_task_types": ["optimization"],
+                    "acceptable_primary_models": ["crop_planting_plan"],
+                    "expected_numeric_ranges": [{"label": "profit", "min": 10, "max": 100}],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = run_real_case_regression(
+        corpus_index_path=corpus_index,
+        gold_path=public_gold,
+        hidden_gold_path=hidden_gold,
+        corpus_root=corpus_root,
+        output_dir=tmp_path / "out",
+        min_average_score=60.0,
+        min_primary_accuracy=0.0,
+        min_candidate_coverage=1.0,
+    )
+
+    assert summary["hidden_gold_enabled"] is True
+    assert summary["hidden_case_count"] == 1
+    assert summary["answer_expectation_count"] == 1
+    assert summary["scores"][0]["hidden"] is True
+    assert summary["scores"][0]["case_id"].startswith("hidden:")
+    assert summary["scores"][0]["selected_models"] == []
 
 
 def test_real_case_regression_runner_executes_tiny_nipt_case(tmp_path):

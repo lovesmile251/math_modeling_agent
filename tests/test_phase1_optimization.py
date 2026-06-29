@@ -6,10 +6,11 @@ from agents.base import (
     K_PAPER_QUALITY_SCORE,
     K_RESULT_ANALYSIS,
     K_SELECTED_MODEL_IDS,
+    ModelDecision,
     ProblemSpec,
     WorkflowState,
 )
-from tools.model_ids import canonical_model_id, normalize_model_ids
+from tools.model_ids import canonical_model_id, normalize_model_decision, normalize_model_ids
 from tools.modeling_dsl import build_formulation
 from tools.prewriting_gate import evaluate_pre_writing_gate
 from workflows.modeling_workflow import ModelingWorkflow
@@ -21,6 +22,37 @@ def test_model_id_normalization_accepts_common_aliases():
     assert result.selected == ["correlation_analysis"]
     assert result.dropped == ["not_a_model"]
     assert canonical_model_id("TOPSIS") == "topsis_rank"
+
+
+def test_model_decision_normalization_keeps_only_executable_ids():
+    result = normalize_model_decision(
+        selected_model_ids=["correlation-analysis", "ghost_model"],
+        primary_model_id="correlation_analysi",
+        baseline_model_id="TOPSIS",
+    )
+
+    assert result.primary == "correlation_analysis"
+    assert result.baseline == "topsis_rank"
+    assert result.selected == ["correlation_analysis", "topsis_rank"]
+    assert result.dropped == ["ghost_model"]
+
+
+def test_workflow_syncs_user_edited_model_decision(temp_workspace):
+    workflow = ModelingWorkflow(use_llm=False, workspace=temp_workspace)
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.model_decision = ModelDecision(
+        primary_model_id="bad_primary",
+        baseline_model_id="TOPSIS",
+        selected_model_ids=["correlation-analysis", "ghost_model"],
+    )
+
+    workflow._sync_model_decision_state(state)
+
+    assert state.model_decision.primary_model_id == "correlation_analysis"
+    assert state.model_decision.baseline_model_id == "topsis_rank"
+    assert state.model_decision.selected_model_ids == ["correlation_analysis", "topsis_rank"]
+    assert state.notes[K_SELECTED_MODEL_IDS] == '["correlation_analysis", "topsis_rank"]'
+    assert "bad_primary" in state.notes["workflow_dropped_model_ids"]
 
 
 def test_formulation_drops_unknown_model_ids_without_crashing():

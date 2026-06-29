@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "case_id": "cumcm-2024-c",
+      "expected_numeric_ranges": [
+        {
+          "label": "objective value",
+          "metric": "objective",
+          "min": 0.0,
+          "max": 1000000000.0
+        }
+      ],
+      "expected_decisions": [
+        {
+          "label": "planting strategy",
+          "required_terms": ["crop", "plan"]
+        }
+      ]
+    }
+  ]
+}

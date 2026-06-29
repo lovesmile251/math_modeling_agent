@@ -6,9 +6,36 @@ from pathlib import Path
 from typing import Any
 
 from agents.base import (
+    A_CLAIM_EVIDENCE_MAP,
+    A_CODE,
+    A_CODE_PLAN,
+    A_EXPERIMENT_PLAN,
+    A_EXPERIMENT_REPORT,
+    A_EXECUTION_LOG,
+    A_FORMULATION_SPEC,
+    A_INNOVATION_EVIDENCE_REPORT,
+    A_MODEL_DECISION,
+    A_PAPER,
+    A_PAPER_OUTLINE,
+    A_PAPER_PDF_LAYOUT_REPORT,
+    A_PAPER_QUALITY,
+    A_RESULT_REGISTRY,
+    A_REVIEW,
+    A_REVIEW_FINDINGS,
+    A_SECTION_DRAFT,
+    A_TASK_TRACEABILITY_REPORT,
+    K_AUTO_REWORK_RERUN_FROM_PHASE,
+    K_EXPORT_PDF_LAYOUT_GATE,
+    K_EXPORT_QUALITY_GATE,
     K_EXECUTION_STATUS,
+    K_INNOVATION_EVIDENCE_GATE,
     K_PAPER_QUALITY_SCORE,
     K_PREWRITING_GATE_STATUS,
+    K_STRONG_BASELINE_GATE,
+    K_STRONG_BASELINE_ISSUES,
+    K_TASK_TRACEABILITY_BLOCKING_ISSUES,
+    K_TASK_TRACEABILITY_GATE,
+    QUALITY_GATE_NOTE_KEYS,
     PhaseStatus,
     WorkflowPhase,
     WorkflowState,
@@ -101,6 +128,48 @@ def recommend_rework_route(state: WorkflowState) -> ReworkRoute | None:
             severity="high",
         )
 
+    if state.notes.get(K_STRONG_BASELINE_GATE) == "failed":
+        issues = state.notes.get(K_STRONG_BASELINE_ISSUES, "")
+        if "no baseline" in issues.lower():
+            return ReworkRoute(
+                WorkflowPhase.MODEL_DECISION,
+                "strong baseline gate failed because no baseline model was designated",
+                severity="high",
+            )
+        return ReworkRoute(
+            WorkflowPhase.EXPERIMENT_PLAN,
+            "strong baseline gate failed; add executed baseline comparison, validation, and ablation evidence",
+            severity="high",
+        )
+
+    if state.notes.get(K_INNOVATION_EVIDENCE_GATE) == "failed":
+        return ReworkRoute(
+            WorkflowPhase.EXPERIMENT_PLAN,
+            "innovation evidence gate failed; run or remove unsupported innovation claims",
+            severity="high",
+        )
+
+    if state.notes.get(K_TASK_TRACEABILITY_GATE) == "failed":
+        issues = state.notes.get(K_TASK_TRACEABILITY_BLOCKING_ISSUES, "")
+        lowered = issues.lower()
+        if "missing executable model binding" in lowered:
+            return ReworkRoute(
+                WorkflowPhase.MODEL_DECISION,
+                "task traceability gate lacks model bindings for one or more deliverables",
+                severity="high",
+            )
+        if "missing result table binding" in lowered:
+            return ReworkRoute(
+                WorkflowPhase.EVIDENCE_MAPPING,
+                "task traceability gate lacks result-table bindings for one or more deliverables",
+                severity="high",
+            )
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "task traceability gate lacks paper-section bindings for one or more deliverables",
+            severity="high",
+        )
+
     if state.notes.get("traceability_gate") == "failed":
         return ReworkRoute(
             WorkflowPhase.SECTION_WRITING,
@@ -108,7 +177,14 @@ def recommend_rework_route(state: WorkflowState) -> ReworkRoute | None:
             severity="high",
         )
 
-    if state.notes.get("export_pdf_layout_gate") == "failed":
+    if state.notes.get(K_EXPORT_QUALITY_GATE) == "failed":
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "formal export quality gate failed; revise paper sections and remove blocking issues",
+            severity="high",
+        )
+
+    if state.notes.get(K_EXPORT_PDF_LAYOUT_GATE) == "failed":
         return ReworkRoute(
             WorkflowPhase.SECTION_WRITING,
             "PDF render layout check failed; revise paper tables, code blocks, or embedded assets",
@@ -153,6 +229,97 @@ def write_rework_plan(workspace: Any, plan: ReworkPlan) -> Path:
     )
 
 
+def build_auto_rework_report(
+    *,
+    plan: ReworkPlan,
+    apply_result: ReworkApplyResult,
+    final_plan: ReworkPlan | None,
+    before_notes: dict[str, str],
+    after_notes: dict[str, str],
+    attempt: int,
+    max_attempts: int,
+    status: str,
+) -> dict[str, Any]:
+    """Build a readable execution report for an automatic rework attempt."""
+
+    return {
+        "schema_version": "1.0",
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "status": status,
+        "initial_route": plan.route.to_dict(),
+        "applied": apply_result.to_dict(),
+        "actions": list(plan.actions),
+        "refresh_artifacts": list(plan.refresh_artifacts),
+        "before_gates": _gate_snapshot(before_notes),
+        "after_gates": _gate_snapshot(after_notes),
+        "before_blockers": _blocker_snapshot(before_notes),
+        "after_blockers": _blocker_snapshot(after_notes),
+        "remaining_route": final_plan.route.to_dict() if final_plan else None,
+        "remaining_plan": final_plan.to_dict() if final_plan else None,
+    }
+
+
+def format_auto_rework_report(report: dict[str, Any]) -> str:
+    route = report.get("initial_route") if isinstance(report.get("initial_route"), dict) else {}
+    remaining = report.get("remaining_route") if isinstance(report.get("remaining_route"), dict) else None
+    lines = [
+        "# 自动返工报告",
+        "",
+        f"- 状态：{report.get('status', 'unknown')}",
+        f"- 尝试次数：{report.get('attempt', 0)}/{report.get('max_attempts', 0)}",
+        f"- 返工起点：{route.get('target_phase', '')}",
+        f"- 严重程度：{route.get('severity', '')}",
+        f"- 触发原因：{route.get('reason', '')}",
+        "",
+        "## 执行动作",
+    ]
+    actions = report.get("actions") if isinstance(report.get("actions"), list) else []
+    lines.extend(f"- {item}" for item in actions)
+    refresh = report.get("refresh_artifacts") if isinstance(report.get("refresh_artifacts"), list) else []
+    lines.extend(["", "## 刷新产物"])
+    lines.extend(f"- `{item}`" for item in refresh) if refresh else lines.append("- 无")
+
+    lines.extend(["", "## 门禁变化", "", "| 门禁 | 返工前 | 返工后 |", "|---|---|---|"])
+    before_gates = report.get("before_gates") if isinstance(report.get("before_gates"), dict) else {}
+    after_gates = report.get("after_gates") if isinstance(report.get("after_gates"), dict) else {}
+    for key in sorted(set(before_gates) | set(after_gates)):
+        lines.append(f"| `{key}` | {before_gates.get(key, '')} | {after_gates.get(key, '')} |")
+
+    lines.extend(["", "## 阻塞项变化"])
+    before_blockers = report.get("before_blockers") if isinstance(report.get("before_blockers"), dict) else {}
+    after_blockers = report.get("after_blockers") if isinstance(report.get("after_blockers"), dict) else {}
+    if before_blockers:
+        lines.append("")
+        lines.append("返工前：")
+        lines.extend(f"- `{key}`: {value}" for key, value in before_blockers.items())
+    if after_blockers:
+        lines.append("")
+        lines.append("返工后：")
+        lines.extend(f"- `{key}`: {value}" for key, value in after_blockers.items())
+    if not before_blockers and not after_blockers:
+        lines.append("- 无")
+
+    lines.extend(["", "## 剩余状态"])
+    if remaining:
+        lines.append(f"- 仍需返工：{remaining.get('target_phase', '')}")
+        lines.append(f"- 剩余原因：{remaining.get('reason', '')}")
+    else:
+        lines.append("- 已解决当前自动返工阻塞项")
+    return "\n".join(lines)
+
+
+def write_auto_rework_report(workspace: Any, report: dict[str, Any]) -> dict[str, Path]:
+    workspace_logs_dir = getattr(workspace, "logs_dir", None)
+    logs_dir = Path(workspace_logs_dir) if workspace_logs_dir is not None else Path(workspace) / "logs"
+    json_path = write_text(
+        logs_dir / "auto_rework_report.json",
+        json.dumps(report, ensure_ascii=False, indent=2),
+    )
+    md_path = write_text(logs_dir / "auto_rework_report.md", format_auto_rework_report(report))
+    return {"json": json_path, "markdown": md_path}
+
+
 def apply_rework_plan(
     state: WorkflowState,
     plan: ReworkPlan | None = None,
@@ -184,7 +351,7 @@ def apply_rework_plan(
                 removed.append(artifact_name)
 
     state.notes["auto_rework_applied"] = "true"
-    state.notes["auto_rework_rerun_from_phase"] = resolved.rerun_from_phase.value
+    state.notes[K_AUTO_REWORK_RERUN_FROM_PHASE] = resolved.rerun_from_phase.value
     state.notes["auto_rework_invalidated_phases"] = ",".join(
         phase.value for phase in resolved.invalidated_phases
     )
@@ -203,6 +370,28 @@ def apply_rework_plan(
         tuple(removed),
         resolved.route.reason,
     )
+
+
+def _gate_snapshot(notes: dict[str, str]) -> dict[str, str]:
+    return {
+        key: str(notes[key])
+        for key in (*QUALITY_GATE_NOTE_KEYS, "traceability_gate")
+        if notes.get(key)
+    }
+
+
+def _blocker_snapshot(notes: dict[str, str]) -> dict[str, str]:
+    blocker_suffixes = (
+        "_issues",
+        "_blocking_issues",
+        "_errors",
+        "_stop_reason",
+    )
+    return {
+        key: str(value)
+        for key, value in notes.items()
+        if value and any(key.endswith(suffix) for suffix in blocker_suffixes)
+    }
 
 
 def _paper_score(state: WorkflowState) -> int | None:
@@ -232,6 +421,12 @@ def _actions_for_phase(target_phase: WorkflowPhase) -> tuple[str, ...]:
             "rerun executable model analysis",
             "rebuild result evidence and regenerate paper sections",
         ),
+        WorkflowPhase.EXPERIMENT_PLAN: (
+            "revise validation, baseline, ablation, and innovation-evidence requirements",
+            "rerun executable model analysis with required validation artifacts",
+            "rebuild experiment report and downstream evidence",
+            "regenerate affected paper sections",
+        ),
         WorkflowPhase.CODE_PLAN: (
             "regenerate code plan from current formulation",
             "rerun code generation and execution",
@@ -241,6 +436,11 @@ def _actions_for_phase(target_phase: WorkflowPhase) -> tuple[str, ...]:
             "rerun result analysis against generated tables and figures",
             "rebuild evidence registry and claim map",
             "regenerate affected paper sections",
+        ),
+        WorkflowPhase.EVIDENCE_MAPPING: (
+            "rebuild result registry and task traceability mappings",
+            "refresh claim evidence map",
+            "regenerate paper sections that cite affected evidence",
         ),
         WorkflowPhase.SECTION_WRITING: (
             "regenerate paper outline or affected sections",
@@ -259,20 +459,24 @@ def _actions_for_phase(target_phase: WorkflowPhase) -> tuple[str, ...]:
 
 def _artifacts_for_phases(phases: tuple[WorkflowPhase, ...]) -> tuple[str, ...]:
     phase_artifacts: dict[WorkflowPhase, tuple[str, ...]] = {
-        WorkflowPhase.MODEL_DECISION: ("model_decision", "formulation_spec"),
-        WorkflowPhase.EXPERIMENT_PLAN: ("experiment_plan",),
-        WorkflowPhase.CODE_PLAN: ("code_plan",),
-        WorkflowPhase.CODE_GENERATION: ("code",),
-        WorkflowPhase.EXECUTION: ("execution_log", "result_registry"),
-        WorkflowPhase.RESULT_ANALYSIS: ("result_analysis", "result_registry"),
-        WorkflowPhase.EVIDENCE_MAPPING: ("claim_evidence_map",),
-        WorkflowPhase.PAPER_OUTLINE: ("paper_outline",),
-        WorkflowPhase.SECTION_WRITING: ("section_draft", "paper"),
-        WorkflowPhase.FACT_REVIEW: ("review_findings",),
-        WorkflowPhase.MATH_REVIEW: ("review_findings",),
-        WorkflowPhase.STRUCTURE_REVIEW: ("review_findings",),
-        WorkflowPhase.LANGUAGE_REVIEW: ("paper_quality", "review"),
-        WorkflowPhase.EXPORT: ("paper_pdf_layout_report", "paper"),
+        WorkflowPhase.MODEL_DECISION: (A_MODEL_DECISION, A_FORMULATION_SPEC),
+        WorkflowPhase.EXPERIMENT_PLAN: (A_EXPERIMENT_PLAN, A_EXPERIMENT_REPORT),
+        WorkflowPhase.CODE_PLAN: (A_CODE_PLAN,),
+        WorkflowPhase.CODE_GENERATION: (A_CODE,),
+        WorkflowPhase.EXECUTION: (A_EXECUTION_LOG, A_RESULT_REGISTRY),
+        WorkflowPhase.RESULT_ANALYSIS: ("result_analysis", A_RESULT_REGISTRY),
+        WorkflowPhase.EVIDENCE_MAPPING: (
+            A_CLAIM_EVIDENCE_MAP,
+            A_TASK_TRACEABILITY_REPORT,
+            A_INNOVATION_EVIDENCE_REPORT,
+        ),
+        WorkflowPhase.PAPER_OUTLINE: (A_PAPER_OUTLINE,),
+        WorkflowPhase.SECTION_WRITING: (A_SECTION_DRAFT, A_PAPER),
+        WorkflowPhase.FACT_REVIEW: (A_REVIEW_FINDINGS,),
+        WorkflowPhase.MATH_REVIEW: (A_REVIEW_FINDINGS,),
+        WorkflowPhase.STRUCTURE_REVIEW: (A_REVIEW_FINDINGS,),
+        WorkflowPhase.LANGUAGE_REVIEW: (A_PAPER_QUALITY, A_REVIEW),
+        WorkflowPhase.EXPORT: (A_PAPER_PDF_LAYOUT_REPORT, A_PAPER),
     }
     artifacts: list[str] = []
     for phase in phases:

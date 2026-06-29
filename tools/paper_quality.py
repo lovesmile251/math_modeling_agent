@@ -75,6 +75,10 @@ SEVERE_ISSUE_MARKERS = (
     "Reference citations without matching entries",
     "Reference entries not cited in body",
     "Reference section is missing",
+    "Model claims without generated result tables",
+    "Formula numbering inconsistent",
+    "Symbol definition mismatch",
+    "Citation format issue",
 )
 
 
@@ -202,6 +206,11 @@ def evaluate_paper_quality(
     suggestions.extend(trace_suggestions)
 
     # ── structured parse via report_builder (#10) ──
+    structured_issues, structured_suggestions, structured_metrics = check_structured_paper_audit(text)
+    issues.extend(structured_issues)
+    suggestions.extend(structured_suggestions)
+    metrics.update(structured_metrics)
+
     struct_issues, struct_suggestions = _check_via_parse(text)
     issues.extend(struct_issues)
     suggestions.extend(struct_suggestions)
@@ -239,6 +248,24 @@ def format_quality_report(report: PaperQualityReport) -> str:
     lines.append("### 优化建议")
     lines.extend(f"- {item}" for item in report.suggestions)
     return "\n".join(lines)
+
+
+def submission_blocking_issues(report: PaperQualityReport) -> list[str]:
+    """Return quality issues that must block formal DOCX/PDF/LaTeX export."""
+
+    blockers = [
+        issue
+        for issue in report.issues
+        if any(marker in issue for marker in SEVERE_ISSUE_MARKERS)
+    ]
+    keyword_count = int(report.metrics.get("keywords", 0) or 0)
+    if keyword_count < AWARD_MIN_KEYWORDS:
+        blockers.append(f"Keyword gate failed: expected 3-5 keywords, got {keyword_count}.")
+    return _dedupe(blockers)
+
+
+def is_submission_ready(report: PaperQualityReport) -> bool:
+    return not submission_blocking_issues(report)
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +459,61 @@ def check_keywords(text: str) -> tuple[list[str], list[str], int]:
         suggestions.append("合并或删除泛化关键词，保留 3-5 个核心关键词。")
 
     return issues, suggestions, count
+
+
+def check_structured_paper_audit(text: str) -> tuple[list[str], list[str], dict[str, int]]:
+    """Audit dense paper-structure signals that are easy to verify mechanically."""
+
+    issues: list[str] = []
+    suggestions: list[str] = []
+    chars = max(len(re.sub(r"\s+", "", text)), 1)
+    figure_count = len(re.findall(r"!\[.*?\]\(.*?\)", text))
+    table_row_count = len(re.findall(r"^\s*\|.+\|\s*$", text, flags=re.MULTILINE))
+    display_equations = _count_display_equations(text)
+    numbered_equations = _count_numbered_equations(text)
+    defined_symbols = _extract_defined_symbols(text)
+    used_symbols = _extract_math_symbols(text)
+    undefined_symbols = sorted(used_symbols - defined_symbols - {"e", "i", "j", "n", "t"})
+    malformed_citations = _malformed_citation_count(text)
+    duplicate_references = _duplicate_reference_count(text)
+    figure_table_density_x1000 = int(round((figure_count + max(0, table_row_count // 3)) * 1000 / chars))
+
+    if chars >= 8000 and figure_table_density_x1000 < 1:
+        issues.append("Figure/table density is too low for a long national-contest paper.")
+        suggestions.append("Add task-level result tables and figures close to the sections that interpret them.")
+
+    if display_equations >= 3 and numbered_equations * 2 < display_equations:
+        issues.append(
+            f"Formula numbering inconsistent: {numbered_equations}/{display_equations} display equations are numbered."
+        )
+        suggestions.append("Number core display equations consistently, especially objective functions and constraints.")
+
+    if len(undefined_symbols) >= 3 and defined_symbols:
+        issues.append(
+            "Symbol definition mismatch: "
+            + ", ".join(undefined_symbols[:8])
+            + " appear in equations but not in the symbol table."
+        )
+        suggestions.append("Update the symbol table so every recurring equation variable has a definition.")
+
+    if malformed_citations:
+        issues.append(f"Citation format issue: {malformed_citations} citation-like references are not bracketed as [n].")
+        suggestions.append("Normalize citations to bracketed numeric references and match them in the reference list.")
+
+    if duplicate_references:
+        issues.append(f"Citation format issue: {duplicate_references} duplicate reference numbers found.")
+        suggestions.append("Renumber references sequentially and avoid duplicated bibliography labels.")
+
+    metrics = {
+        "figure_table_density_x1000": figure_table_density_x1000,
+        "display_equations": display_equations,
+        "numbered_equations": numbered_equations,
+        "defined_symbols": len(defined_symbols),
+        "undefined_symbols": len(undefined_symbols),
+        "malformed_citations": malformed_citations,
+        "duplicate_references": duplicate_references,
+    }
+    return issues, suggestions, metrics
 
 
 def check_traceability(
@@ -718,6 +800,70 @@ def _extract_section(text: str, section_name: str) -> str:
 
 def _count_markdown_table_rows(text: str) -> int:
     return len(re.findall(r"^\s*\|.+\|\s*$", text, flags=re.MULTILINE))
+
+
+def _count_display_equations(text: str) -> int:
+    dollar_blocks = len(re.findall(r"\$\$(.*?)\$\$", text, flags=re.DOTALL))
+    bracket_blocks = len(re.findall(r"\\\[(.*?)\\\]", text, flags=re.DOTALL))
+    return dollar_blocks + bracket_blocks
+
+
+def _count_numbered_equations(text: str) -> int:
+    numbered = 0
+    for body in re.findall(r"\$\$(.*?)\$\$|\\\[(.*?)\\\]", text, flags=re.DOTALL):
+        equation = next((part for part in body if part), "")
+        if re.search(r"\\tag\{[^}]+\}", equation) or re.search(r"\(\s*\d+(?:\.\d+)?\s*\)\s*$", equation.strip()):
+            numbered += 1
+    return numbered
+
+
+def _extract_defined_symbols(text: str) -> set[str]:
+    section = _extract_section(text, "绗﹀彿") or _extract_section(text, "Symbol")
+    symbols: set[str] = set()
+    for line in section.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip().strip("`$\\()[]{}") for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        first = cells[0]
+        if not first or set(first) <= {"-", ":"}:
+            continue
+        if any(marker in first.lower() for marker in ("symbol", "绗﹀彿", "含义", "鍚")):
+            continue
+        match = re.match(r"([A-Za-z])(?:[_\^].*)?$", first)
+        if match:
+            symbols.add(match.group(1))
+    return symbols
+
+
+def _extract_math_symbols(text: str) -> set[str]:
+    math_chunks = []
+    math_chunks.extend(re.findall(r"\$\$(.*?)\$\$", text, flags=re.DOTALL))
+    math_chunks.extend(re.findall(r"\\\[(.*?)\\\]", text, flags=re.DOTALL))
+    math_chunks.extend(re.findall(r"\\\((.*?)\\\)", text, flags=re.DOTALL))
+    symbols: set[str] = set()
+    for chunk in math_chunks:
+        stripped = re.sub(r"\\(?:alpha|beta|gamma|delta|lambda|mu|sigma|sum|prod|frac|sqrt|tag)\b", " ", chunk)
+        for symbol in re.findall(r"(?<![A-Za-z\\])([A-Za-z])(?:[_\^]|(?![A-Za-z]))", stripped):
+            symbols.add(symbol)
+    return symbols
+
+
+def _malformed_citation_count(text: str) -> int:
+    ref_section = _extract_reference_section(text)
+    body = text.replace(ref_section, "") if ref_section else text
+    patterns = (
+        r"(?i)\b(?:ref|reference|citation)\.?\s+\d+\b",
+        r"文献\s*\d+",
+        r"参考文献\s*\d+",
+    )
+    return sum(len(re.findall(pattern, body)) for pattern in patterns)
+
+
+def _duplicate_reference_count(text: str) -> int:
+    numbers = re.findall(r"^\s*\[(\d+)\]", _extract_reference_section(text), flags=re.MULTILINE)
+    return len(numbers) - len(set(numbers))
 
 
 def _extract_keywords_text(text: str) -> str:

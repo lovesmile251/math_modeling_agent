@@ -104,6 +104,96 @@ def test_answer_reproduction_audit_flags_review_model_count_mismatch(tmp_path: P
     assert any("不一致" in risk for risk in audit["risks"])
 
 
+def test_answer_reproduction_audit_checks_gold_numeric_ranges_and_decisions(tmp_path: Path):
+    workspace = tmp_path / "case-c"
+    logs = workspace / "logs"
+    tables = workspace / "tables"
+    paper = workspace / "paper"
+    for path in (logs, tables, paper):
+        path.mkdir(parents=True)
+
+    table_path = tables / "strategy.csv"
+    pd.DataFrame(
+        {
+            "metric": ["profit", "demand_satisfaction"],
+            "value": [42.5, 0.93],
+            "decision": ["plant wheat first", "meet demand"],
+        }
+    ).to_csv(table_path, index=False)
+    (logs / "result_registry.json").write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "type": "table",
+                        "name": "strategy",
+                        "path": str(table_path),
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (logs / "traceability_report.json").write_text(
+        json.dumps({"passed": True, "coverage_pct": 90.0}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (paper / "review_report.md").write_text("", encoding="utf-8")
+    (paper / "paper_draft.md").write_text(
+        "The final decision is to plant wheat first. profit reaches 42.5.",
+        encoding="utf-8",
+    )
+
+    audit = audit_workspace(
+        workspace,
+        case_id="case-c",
+        gold_expectation={
+            "expected_numeric_ranges": [
+                {"metric": "profit", "min": 40.0, "max": 45.0},
+                {"column": "value", "min": 0.9, "max": 1.0},
+            ],
+            "expected_decisions": [
+                {"label": "crop strategy", "acceptable_values": ["plant wheat first"]}
+            ],
+        },
+    )
+
+    correctness = audit["answer_correctness_audit"]
+    assert correctness["applicable"] is True
+    assert correctness["passed"] is True
+    assert correctness["pass_rate"] == 1.0
+
+
+def test_answer_reproduction_audit_flags_failed_gold_expectation(tmp_path: Path):
+    workspace = tmp_path / "case-d"
+    logs = workspace / "logs"
+    tables = workspace / "tables"
+    paper = workspace / "paper"
+    for path in (logs, tables, paper):
+        path.mkdir(parents=True)
+
+    table_path = tables / "strategy.csv"
+    pd.DataFrame({"metric": ["profit"], "value": [12.0]}).to_csv(table_path, index=False)
+    (logs / "result_registry.json").write_text(
+        json.dumps({"entries": [{"type": "table", "path": str(table_path)}]}),
+        encoding="utf-8",
+    )
+    (paper / "paper_draft.md").write_text("decision: keep current plan", encoding="utf-8")
+
+    audit = audit_workspace(
+        workspace,
+        case_id="case-d",
+        gold_expectation={
+            "expected_numeric_ranges": [{"metric": "profit", "min": 40.0, "max": 45.0}],
+            "expected_decisions": [{"acceptable_values": ["plant wheat first"]}],
+        },
+    )
+
+    assert audit["answer_correctness_audit"]["passed"] is False
+    assert any("answer correctness" in risk for risk in audit["risks"])
+
+
 def test_review_agent_counts_model_runs_format(tmp_path: Path):
     logs = tmp_path / "logs"
     logs.mkdir()

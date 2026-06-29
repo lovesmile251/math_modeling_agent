@@ -16,6 +16,8 @@ from agents.base import (
     K_LAST_REPAIR_APPLIED,
     K_LAST_REPAIR_NOTE,
     K_SELECTED_MODEL_IDS,
+    K_STRONG_BASELINE_GATE,
+    K_STRONG_BASELINE_ISSUES,
     Agent,
     WorkflowState,
 )
@@ -132,6 +134,7 @@ class ExecutionAgent(Agent):
                 )
                 state.artifacts[A_EXPERIMENT_REPORT] = report_path
                 state.artifacts["experiment_comparison"] = comparison_path
+                self._record_experiment_audit_notes(state, report_path)
                 break
 
             state.notes[K_EXECUTION_ERROR] = result.stderr
@@ -160,6 +163,19 @@ class ExecutionAgent(Agent):
         if not final_ok:
             state.add_error(self.name, f"Execution failed after {attempt} attempt(s).")
         return state
+
+    def _record_experiment_audit_notes(self, state: WorkflowState, report_path: Path) -> None:
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return
+        audit = report.get("strong_baseline_audit")
+        if not isinstance(audit, dict):
+            return
+        state.notes[K_STRONG_BASELINE_GATE] = "passed" if audit.get("passed") else "failed"
+        issues = audit.get("issues") if isinstance(audit.get("issues"), list) else []
+        if issues:
+            state.notes[K_STRONG_BASELINE_ISSUES] = "; ".join(str(item) for item in issues)
 
     def _write_execution_manifest(
         self,

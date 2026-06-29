@@ -10,6 +10,10 @@ from typing import Any
 
 import pandas as pd
 
+from tools.answer_correctness import (
+    audit_answer_correctness as _shared_audit_answer_correctness,
+    load_gold_expectations,
+)
 from tools.file_tool import write_text
 from tools.paper_quality import (
     AWARD_MEDIAN_CHARS,
@@ -34,14 +38,17 @@ def audit_from_simulation_report(
     *,
     output_dir: Path,
     max_claims_per_case: int = 80,
+    gold_expectations_path: Path | None = None,
 ) -> dict[str, Any]:
     payload = json.loads(simulation_report.read_text(encoding="utf-8"))
     case_items = [item for item in payload.get("results", []) if isinstance(item, dict)]
+    gold_expectations = load_gold_expectations(gold_expectations_path)
     audits = [
         audit_workspace(
             Path(str(item.get("workspace", ""))),
             case_id=str(item.get("case_id", "")),
             max_claims=max_claims_per_case,
+            gold_expectation=gold_expectations.get(str(item.get("case_id", ""))),
         )
         for item in case_items
     ]
@@ -50,7 +57,13 @@ def audit_from_simulation_report(
     return summary
 
 
-def audit_workspace(workspace: Path, *, case_id: str | None = None, max_claims: int = 80) -> dict[str, Any]:
+def audit_workspace(
+    workspace: Path,
+    *,
+    case_id: str | None = None,
+    max_claims: int = 80,
+    gold_expectation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     workspace = workspace.resolve()
     case_id = case_id or workspace.name
     registry = _read_json(workspace / "logs" / "result_registry.json")
@@ -69,6 +82,11 @@ def audit_workspace(workspace: Path, *, case_id: str | None = None, max_claims: 
     claim_audit = _verify_claims(claims, max_claims=max_claims)
     model_count_audit = _audit_model_count(run_summary, review_text)
     paper_audit = _audit_paper_against_award_style(paper_text, workspace)
+    correctness_audit = _shared_audit_answer_correctness(
+        table_entries=table_entries,
+        paper_text=paper_text,
+        expectation=gold_expectation,
+    )
     traceability_coverage = float(traceability.get("coverage_pct", 0.0)) if isinstance(traceability, dict) else 0.0
     traceability_passed = bool(traceability.get("passed", False)) if isinstance(traceability, dict) else False
 
@@ -79,6 +97,7 @@ def audit_workspace(workspace: Path, *, case_id: str | None = None, max_claims: 
         paper_audit=paper_audit,
         traceability_coverage=traceability_coverage,
         traceability_passed=traceability_passed,
+        correctness_audit=correctness_audit,
     )
     score = _audit_score(
         claim_audit=claim_audit,
@@ -87,6 +106,7 @@ def audit_workspace(workspace: Path, *, case_id: str | None = None, max_claims: 
         paper_audit=paper_audit,
         traceability_coverage=traceability_coverage,
         traceability_passed=traceability_passed,
+        correctness_audit=correctness_audit,
     )
     return {
         "case_id": case_id,
@@ -100,6 +120,7 @@ def audit_workspace(workspace: Path, *, case_id: str | None = None, max_claims: 
             "passed": traceability_passed,
             "coverage_pct": traceability_coverage,
         },
+        "answer_correctness_audit": correctness_audit,
         "award_style_audit": paper_audit,
         "artifact_counts": {
             "registered_tables": len(table_entries),
@@ -126,6 +147,15 @@ def summarize_audits(audits: list[dict[str, Any]]) -> dict[str, Any]:
             item["award_style_audit"]["alignment_rate"]
             for item in audits
         ]),
+        "answer_correctness_pass_rate": _average([
+            item["answer_correctness_audit"]["pass_rate"]
+            for item in audits
+            if item.get("answer_correctness_audit", {}).get("applicable")
+        ]),
+        "answer_correctness_case_count": sum(
+            item.get("answer_correctness_audit", {}).get("applicable", False)
+            for item in audits
+        ),
         "high_risk_case_count": sum(item["reproducibility_band"] == "high_risk" for item in audits),
         "results": audits,
     }
@@ -170,6 +200,44 @@ def format_audit_report(summary: dict[str, Any]) -> str:
             "## 解释",
             "",
             "该审计复算 evidence map 中可解析的数值声明，校验结果表哈希、论文证据追溯、审稿报告与运行摘要的一致性，并将论文指标与优秀论文中位参考进行对照。它不能证明答案一定正确，但能降低“结果不可复现、证据链断裂、论文与产物矛盾”的风险。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_audit_report(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Answer Reproduction and Award-Style Audit",
+        "",
+        f"- Cases: {summary['case_count']}",
+        f"- Average audit score: {summary['average_audit_score']}",
+        f"- Numeric claim verified rate: {summary['verified_claim_rate']:.1%}",
+        f"- Result table hash pass rate: {summary['hash_pass_rate']:.1%}",
+        f"- Award-style alignment rate: {summary['award_alignment_rate']:.1%}",
+        f"- Answer correctness applicable cases: {summary['answer_correctness_case_count']}",
+        f"- Answer correctness pass rate: {summary['answer_correctness_pass_rate']:.1%}",
+        f"- High-risk cases: {summary['high_risk_case_count']}",
+        "",
+        "## Case Audits",
+        "",
+        "| Case | Audit score | Band | Numeric reproducibility | Hash pass | Style alignment | Correctness | Main risks |",
+        "|---|---:|---|---:|---:|---:|---:|---|",
+    ]
+    for item in summary["results"]:
+        risks = "; ".join(item["risks"][:3]) if item["risks"] else "None"
+        lines.append(
+            f"| {item['case_id']} | {item['audit_score']:.2f} | {item['reproducibility_band']} | "
+            f"{item['numeric_claim_audit']['verified_rate']:.1%} | "
+            f"{item['registry_hash_audit']['hash_pass_rate']:.1%} | "
+            f"{item['award_style_audit']['alignment_rate']:.1%} | "
+            f"{item['answer_correctness_audit']['pass_rate']:.1%} | {risks} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "This audit recomputes verifiable numeric claims, validates result table hashes, checks traceability and award-style paper density, and optionally checks answers against hidden gold expectations. It reduces reproducibility and evidence-chain risk, but it does not replace human contest judging.",
         ]
     )
     return "\n".join(lines)
@@ -249,6 +317,123 @@ def _verify_registry_hashes(table_entries: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _audit_answer_correctness(
+    *,
+    table_entries: list[dict[str, Any]],
+    paper_text: str,
+    expectation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not expectation:
+        return {
+            "applicable": False,
+            "passed": True,
+            "pass_rate": 1.0,
+            "numeric_checks": [],
+            "decision_checks": [],
+            "failures": [],
+        }
+
+    numeric_ranges = _as_list(
+        expectation.get("expected_numeric_ranges", expectation.get("numeric_ranges", []))
+    )
+    decisions = _as_list(expectation.get("expected_decisions", expectation.get("decisions", [])))
+    numeric_checks = [
+        _audit_numeric_range_expectation(item, table_entries=table_entries, paper_text=paper_text)
+        for item in numeric_ranges
+        if isinstance(item, dict)
+    ]
+    table_text = _registered_table_text(table_entries)
+    decision_checks = [
+        _audit_decision_expectation(item, paper_text=f"{paper_text}\n{table_text}")
+        for item in decisions
+        if isinstance(item, dict)
+    ]
+    checks = numeric_checks + decision_checks
+    passed_count = sum(item["passed"] for item in checks)
+    failures = [
+        {"type": item["type"], "label": item["label"], "reason": item["reason"]}
+        for item in checks
+        if not item["passed"]
+    ]
+    return {
+        "applicable": bool(checks),
+        "passed": (not checks) or passed_count == len(checks),
+        "pass_rate": round(passed_count / len(checks), 4) if checks else 1.0,
+        "numeric_checks": numeric_checks,
+        "decision_checks": decision_checks,
+        "failures": failures,
+    }
+
+
+def _audit_numeric_range_expectation(
+    expectation: dict[str, Any],
+    *,
+    table_entries: list[dict[str, Any]],
+    paper_text: str,
+) -> dict[str, Any]:
+    label = str(
+        expectation.get("label")
+        or expectation.get("metric")
+        or expectation.get("column")
+        or expectation.get("name")
+        or "numeric_expectation"
+    )
+    lower, upper = _numeric_bounds(expectation)
+    values = _find_expected_numeric_values(expectation, table_entries, paper_text)
+    matching = [
+        value
+        for value in values
+        if (lower is None or value >= lower) and (upper is None or value <= upper)
+    ]
+    passed = bool(matching) and (lower is not None or upper is not None)
+    reason = "matched" if passed else "no value in expected range"
+    if lower is None and upper is None:
+        reason = "missing numeric bounds"
+    return {
+        "type": "numeric_range",
+        "label": label,
+        "passed": passed,
+        "range": {"min": lower, "max": upper},
+        "matched_values": [round(value, 8) for value in matching[:10]],
+        "sampled_values": [round(value, 8) for value in values[:20]],
+        "reason": reason,
+    }
+
+
+def _audit_decision_expectation(expectation: dict[str, Any], *, paper_text: str) -> dict[str, Any]:
+    label = str(expectation.get("label") or expectation.get("name") or "decision_expectation")
+    acceptable = [
+        str(item).strip().lower()
+        for item in _as_list(
+            expectation.get(
+                "acceptable_values",
+                expectation.get("expected_values", expectation.get("values", [])),
+            )
+        )
+        if str(item).strip()
+    ]
+    required_terms = [
+        str(item).strip().lower()
+        for item in _as_list(expectation.get("required_terms", []))
+        if str(item).strip()
+    ]
+    haystack = paper_text.lower()
+    value_hit = bool(acceptable) and any(value in haystack for value in acceptable)
+    terms_hit = bool(required_terms) and all(term in haystack for term in required_terms)
+    passed = value_hit or terms_hit
+    reason = "matched" if passed else "missing acceptable decision evidence"
+    if not acceptable and not required_terms:
+        reason = "missing decision criteria"
+    return {
+        "type": "decision",
+        "label": label,
+        "passed": passed,
+        "acceptable_values": acceptable,
+        "required_terms": required_terms,
+        "reason": reason,
+    }
+
+
 def _audit_model_count(run_summary: Any, review_text: str) -> dict[str, Any]:
     actual = 0
     if isinstance(run_summary, list):
@@ -320,6 +505,7 @@ def _collect_risks(
     paper_audit: dict[str, Any],
     traceability_coverage: float,
     traceability_passed: bool,
+    correctness_audit: dict[str, Any],
 ) -> list[str]:
     risks: list[str] = []
     if claim_audit["verifiable_claims"] == 0:
@@ -336,6 +522,8 @@ def _collect_risks(
         risks.append("论文数值证据追溯覆盖不足 85%")
     if paper_audit["alignment_rate"] < 0.75:
         risks.append("优秀论文风格指标对齐不足 75%")
+    if correctness_audit.get("applicable") and not correctness_audit.get("passed"):
+        risks.append("answer correctness expectations failed")
     return risks
 
 
@@ -347,13 +535,18 @@ def _audit_score(
     paper_audit: dict[str, Any],
     traceability_coverage: float,
     traceability_passed: bool,
+    correctness_audit: dict[str, Any],
 ) -> float:
     claim_score = 25 * claim_audit["verified_rate"]
     hash_score = 15 * hash_audit["hash_pass_rate"]
     model_consistency_score = 15 if model_count_audit["consistent"] else 0
     trace_score = 20 * (min(traceability_coverage, 100.0) / 100.0) * (1.0 if traceability_passed else 0.7)
     award_score = 25 * paper_audit["alignment_rate"]
-    return round(claim_score + hash_score + model_consistency_score + trace_score + award_score, 2)
+    base_score = claim_score + hash_score + model_consistency_score + trace_score + award_score
+    if not correctness_audit.get("applicable"):
+        return round(base_score, 2)
+    correctness_score = 15 * float(correctness_audit.get("pass_rate", 0.0))
+    return round(base_score * 0.85 + correctness_score, 2)
 
 
 def _band(score: float, risks: list[str]) -> str:
@@ -365,6 +558,150 @@ def _band(score: float, risks: list[str]) -> str:
     if score >= 70:
         return "needs_manual_review"
     return "high_risk"
+
+
+def _load_gold_expectations(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None or not path.exists():
+        return {}
+    payload = _read_json(path)
+    if isinstance(payload, dict):
+        items = payload.get("cases", payload.get("gold", []))
+    else:
+        items = payload
+    expectations: dict[str, dict[str, Any]] = {}
+    if not isinstance(items, list):
+        return expectations
+    for item in items:
+        if not isinstance(item, dict) or "case_id" not in item:
+            continue
+        if (
+            item.get("expected_numeric_ranges")
+            or item.get("numeric_ranges")
+            or item.get("expected_decisions")
+            or item.get("decisions")
+        ):
+            expectations[str(item["case_id"])] = item
+    return expectations
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _numeric_bounds(expectation: dict[str, Any]) -> tuple[float | None, float | None]:
+    lower = _optional_float(expectation.get("min", expectation.get("lower")))
+    upper = _optional_float(expectation.get("max", expectation.get("upper")))
+    target = _optional_float(expectation.get("target", expectation.get("expected")))
+    if target is not None and lower is None and upper is None:
+        tolerance = _optional_float(expectation.get("tolerance"))
+        relative_tolerance = _optional_float(expectation.get("relative_tolerance"))
+        if tolerance is None and relative_tolerance is not None:
+            tolerance = abs(target) * relative_tolerance
+        if tolerance is None:
+            tolerance = max(1e-6, abs(target) * 1e-4)
+        lower = target - tolerance
+        upper = target + tolerance
+    return lower, upper
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _find_expected_numeric_values(
+    expectation: dict[str, Any],
+    table_entries: list[dict[str, Any]],
+    paper_text: str,
+) -> list[float]:
+    values: list[float] = []
+    metric = str(expectation.get("metric", expectation.get("label", ""))).strip().lower()
+    column = str(expectation.get("column", "")).strip()
+    source_names = {str(item).lower() for item in _as_list(expectation.get("source_files", []))}
+    for entry in table_entries:
+        path = _resolve_path(str(entry.get("path", "")))
+        if source_names and path.name.lower() not in source_names and str(path).lower() not in source_names:
+            continue
+        values.extend(_numeric_values_from_table(path, column=column, metric=metric))
+    values.extend(_numeric_values_from_text(paper_text, metric=metric))
+    return values
+
+
+def _numeric_values_from_table(path: Path, *, column: str, metric: str) -> list[float]:
+    if not path.exists():
+        return []
+    try:
+        df = pd.read_csv(path)
+    except (OSError, pd.errors.ParserError, UnicodeDecodeError):
+        return []
+    if column and column in df.columns:
+        return [
+            float(value)
+            for value in pd.to_numeric(df[column], errors="coerce").dropna().tolist()
+            if math.isfinite(float(value))
+        ]
+    if metric:
+        values: list[float] = []
+        for _, row in df.iterrows():
+            row_text = " ".join(str(value).lower() for value in row.tolist())
+            if metric not in row_text:
+                continue
+            for value in row.tolist():
+                parsed = _optional_float(value)
+                if parsed is not None:
+                    values.append(parsed)
+        return values
+    numeric = df.apply(pd.to_numeric, errors="coerce")
+    return [
+        float(value)
+        for value in numeric.to_numpy().ravel().tolist()
+        if value == value and math.isfinite(float(value))
+    ]
+
+
+def _numeric_values_from_text(text: str, *, metric: str) -> list[float]:
+    search_text = text
+    if metric:
+        spans = []
+        lowered = text.lower()
+        start = 0
+        while True:
+            index = lowered.find(metric, start)
+            if index < 0:
+                break
+            spans.append(text[index : index + 220])
+            start = index + len(metric)
+        search_text = "\n".join(spans)
+    values: list[float] = []
+    for match in re.finditer(r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?%?", search_text, flags=re.IGNORECASE):
+        parsed = _optional_float(match.group(0).rstrip("%"))
+        if parsed is not None:
+            values.append(parsed)
+    return values
+
+
+def _registered_table_text(table_entries: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for entry in table_entries:
+        path = _resolve_path(str(entry.get("path", "")))
+        if not path.exists():
+            continue
+        try:
+            parts.append(path.read_text(encoding="utf-8", errors="ignore")[:20000])
+        except OSError:
+            continue
+    return "\n".join(parts)
 
 
 def _resolve_path(value: str) -> Path:
@@ -417,12 +754,14 @@ def main() -> None:
     parser.add_argument("--simulation-report", type=Path, default=Path("benchmarks/results/contest_simulation.json"))
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/results"))
     parser.add_argument("--max-claims-per-case", type=int, default=80)
+    parser.add_argument("--gold-expectations", type=Path, default=None)
     args = parser.parse_args()
 
     summary = audit_from_simulation_report(
         args.simulation_report,
         output_dir=args.output_dir,
         max_claims_per_case=max(args.max_claims_per_case, 1),
+        gold_expectations_path=args.gold_expectations,
     )
     compact = {key: value for key, value in summary.items() if key != "results"}
     print(json.dumps(compact, ensure_ascii=False))

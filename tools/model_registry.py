@@ -238,6 +238,7 @@ ADVANCED_MODEL_REGISTRY: list[tuple[str, str, str, str, str | None]] = [
     ("nonlinear_optimization", "nonlinear_optimization", "models.optimization.advanced", "nonlinear_gradient_optimization", None),
     ("integer_programming", "integer_programming", "models.optimization.advanced", "integer_branch_bound", None),
     ("multiobjective_optimization", "multiobjective_optimization", "models.optimization.advanced", "multiobjective_weighted_sum", None),
+    ("dynamic_programming_plan", "dynamic_programming_plan", "models.optimization.advanced", "dynamic_programming_plan", None),
     ("astar_path", "astar_path", "models.optimization.advanced", "astar_path_plan", None),
     ("tsp_route", "tsp_route", "models.optimization.advanced", "tsp_route_heuristic", None),
     ("vrp_route", "vrp_route", "models.optimization.advanced", "vrp_savings_heuristic", None),
@@ -251,6 +252,7 @@ ADVANCED_MODEL_REGISTRY: list[tuple[str, str, str, str, str | None]] = [
     ("nonlinear_embedding", "nonlinear_embedding", "models.dimensionality.nonlinear", "nonlinear_embedding", None),
     # statistics advanced
     ("monte_carlo", "monte_carlo", "models.statistics.monte_carlo", "monte_carlo_simulation", None),
+    ("statistical_test_suite", "statistical_test_suite", "models.statistics.hypothesis", "statistical_test_suite", None),
     # queueing advanced
     ("jackson_network", "jackson_network", "models.queueing.network", "jackson_network_queue", None),
     # inventory advanced
@@ -292,6 +294,7 @@ ADVANCED_MODEL_REGISTRY: list[tuple[str, str, str, str, str | None]] = [
     ("ridge_regression", "ridge_regression", "models.prediction.ml", "ridge_regression_forecast", None),
     # graph advanced
     ("community_detection", "community_detection", "models.graph.network", "community_detection", None),
+    ("independent_cascade", "independent_cascade", "models.graph.network", "independent_cascade_simulation", None),
     ("friend_recommendation", "friend_recommendation", "models.social_network.campus", "campus_friend_recommendation_model", None),
     ("information_propagation", "information_propagation", "models.social_network.campus", "campus_information_propagation_model", None),
     ("influence_maximization", "influence_maximization", "models.social_network.campus", "campus_influence_maximization_model", None),

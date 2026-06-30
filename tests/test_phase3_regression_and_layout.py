@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from agents.base import K_EXECUTION_STATUS, K_PREWRITING_GATE_STATUS, PhaseStatus, WorkflowPhase, WorkflowState
+from agents.base import (
+    K_AUTO_REWORK_REPAIR_BRIEF,
+    K_AUTO_REWORK_REPAIR_HINTS,
+    K_EXECUTION_STATUS,
+    K_PREWRITING_GATE_STATUS,
+    PhaseStatus,
+    WorkflowPhase,
+    WorkflowState,
+)
 from agents.model_selection_crew import ModelSelectionCrew
 from models.fitting.advanced import parameter_identification
 from models.optimization.planting import crop_planting_plan
@@ -39,10 +47,12 @@ def test_rework_router_builds_executable_plan_file(temp_workspace):
     assert plan.rerun_from_phase.value == "code_plan"
     assert "execution" in [phase.value for phase in plan.invalidated_phases]
     assert "result_registry" in plan.refresh_artifacts
+    assert any("non-empty CSV" in hint for hint in plan.repair_hints)
     plan_path = write_rework_plan(temp_workspace, plan)
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
     assert payload["rerun_from_phase"] == "code_plan"
     assert payload["can_auto_apply"] is True
+    assert payload["repair_hints"]
 
 
 def test_rework_plan_application_marks_downstream_state(temp_workspace):
@@ -61,6 +71,8 @@ def test_rework_plan_application_marks_downstream_state(temp_workspace):
     assert "result_registry" in result.stale_artifacts
     assert "result_registry" in result.removed_artifacts
     assert "result_registry" not in state.artifacts
+    assert state.notes[K_AUTO_REWORK_REPAIR_HINTS]
+    assert "non-empty CSV" in state.notes[K_AUTO_REWORK_REPAIR_BRIEF]
     assert state.decisions[-1]["action"] == "apply_rework_plan"
 
 
@@ -124,6 +136,111 @@ def test_rework_router_sends_export_quality_failure_to_section_writing(temp_work
     assert route is not None
     assert route.target_phase == WorkflowPhase.SECTION_WRITING
     assert route.severity == "high"
+
+
+def test_rework_router_sends_award_structure_failure_to_section_writing(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["export_quality_gate"] = "failed"
+    state.notes["export_blocking_issues"] = (
+        "Award structure weak: missing high-value sections: validation, sensitivity"
+    )
+
+    route = recommend_rework_route(state)
+    plan = build_rework_plan(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.SECTION_WRITING
+    assert plan is not None
+    assert any("national-contest section skeleton" in hint for hint in plan.repair_hints)
+
+
+def test_rework_router_sends_missing_high_level_model_table_to_code_plan(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["export_quality_gate"] = "failed"
+    state.notes["export_blocking_issues"] = (
+        "Claimed high-level model has no matching generated result table: cvar_optimization"
+    )
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.CODE_PLAN
+    assert route.severity == "high"
+
+
+def test_rework_router_sends_weak_risk_model_evidence_to_section_writing(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["export_quality_gate"] = "failed"
+    state.notes["export_blocking_issues"] = (
+        "Risk model evidence weak: cvar_optimization is claimed without at least 2 model-specific metrics."
+    )
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.SECTION_WRITING
+    assert route.severity == "high"
+
+
+def test_rework_router_sends_paper_evidence_gate_failure_to_specific_phase(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["paper_evidence_gate"] = "failed"
+    state.notes["paper_evidence_issues"] = (
+        "Claimed high-level model has no matching generated result table: cvar_optimization"
+    )
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.CODE_PLAN
+
+
+def test_rework_router_sends_missing_selected_high_level_model_narrative_to_section_writing(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["paper_evidence_gate"] = "failed"
+    state.notes["paper_evidence_issues"] = (
+        "Selected high-level model missing from paper narrative: cvar_optimization"
+    )
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.SECTION_WRITING
+
+
+def test_rework_router_sends_high_level_table_metric_gap_to_code_plan(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["paper_evidence_gate"] = "failed"
+    state.notes["paper_evidence_issues"] = (
+        "High-level model table lacks model-specific metrics: cvar_optimization"
+    )
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.CODE_PLAN
+
+    plan = build_rework_plan(state)
+
+    assert plan is not None
+    assert any("cvar_optimization" in hint for hint in plan.repair_hints)
+
+
+def test_rework_router_sends_missing_core_result_table_based_on_available_tables(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes["export_quality_gate"] = "failed"
+    state.notes["export_blocking_issues"] = "Core result table missing: result section has no Markdown result table."
+
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.RESULT_ANALYSIS
+
+    (temp_workspace.tables_dir / "result_cvar_optimization.csv").write_text("cvar_loss\n45\n", encoding="utf-8")
+    route = recommend_rework_route(state)
+
+    assert route is not None
+    assert route.target_phase == WorkflowPhase.SECTION_WRITING
 
 
 def test_pdf_render_layout_check_creates_screenshots(tmp_path):

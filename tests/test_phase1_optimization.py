@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
+
 from agents.base import (
     K_EXECUTION_STATUS,
     K_LLM_FAILURE_KIND,
     K_PAPER_QUALITY_SCORE,
     K_RESULT_ANALYSIS,
     K_SELECTED_MODEL_IDS,
+    ModelCritique,
     ModelDecision,
     ProblemSpec,
     WorkflowState,
 )
+from agents.decision_agent import DecisionAgent
 from tools.model_ids import canonical_model_id, normalize_model_decision, normalize_model_ids
 from tools.modeling_dsl import build_formulation
 from tools.prewriting_gate import evaluate_pre_writing_gate
@@ -53,6 +57,27 @@ def test_workflow_syncs_user_edited_model_decision(temp_workspace):
     assert state.model_decision.selected_model_ids == ["correlation_analysis", "topsis_rank"]
     assert state.notes[K_SELECTED_MODEL_IDS] == '["correlation_analysis", "topsis_rank"]'
     assert "bad_primary" in state.notes["workflow_dropped_model_ids"]
+
+
+def test_decision_agent_preserves_multitask_model_coverage_under_high_risk(temp_workspace):
+    state = WorkflowState(problem_text="test", data_files=[], workspace=temp_workspace)
+    state.notes[K_SELECTED_MODEL_IDS] = (
+        '["trend_forecast", "smoothing_forecast", "entropy_weights", "topsis_rank"]'
+    )
+    state.model_critique = ModelCritique(
+        issues=[{"severity": "high", "description": "no structured data"}],
+    )
+
+    state = DecisionAgent().run(state)
+
+    assert state.model_decision is not None
+    assert state.model_decision.selected_model_ids == [
+        "trend_forecast",
+        "smoothing_forecast",
+        "entropy_weights",
+        "topsis_rank",
+    ]
+    assert json.loads(state.notes[K_SELECTED_MODEL_IDS]) == state.model_decision.selected_model_ids
 
 
 def test_formulation_drops_unknown_model_ids_without_crashing():

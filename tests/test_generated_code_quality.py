@@ -273,7 +273,18 @@ def test_generated_script_no_data_does_not_crash(tmp_path: Path):
     summary_path = ws_root / "logs" / "run_summary.json"
     assert summary_path.exists()
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert "message" in summary  # "No data files provided."
+    assert isinstance(summary, list)
+    assert summary[0]["statement_only"] is True
+    assert summary[0]["source"] == "statement_only"
+    assert summary[0]["model_runs"][0]["status"] == "success"
+    assert Path(summary[0]["model_runs"][0]["table"]).exists()
+    assert list((ws_root / "tables").glob("statement_*.csv"))
+    statement_figures = list((ws_root / "figures").glob("statement_*.png"))
+    assert len(statement_figures) >= 8
+    assert len(summary[0]["charts"]) >= 8
+    task_breakdown = pd.read_csv(ws_root / "tables" / "statement_task_breakdown.csv")
+    assert task_breakdown["task_id"].str.match(r"^S\d+$").all()
+    assert (ws_root / "tables" / "statement_optimization_result.csv").exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

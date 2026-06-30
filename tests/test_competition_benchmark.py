@@ -45,11 +45,13 @@ def test_competition_score_rewards_complete_evidence(temp_workspace):
             "formulation_spec": experiment,
             "experiment_report": experiment,
             "claim_evidence_map": experiment,
+            "paper_evidence_audit": experiment,
             "paper": experiment,
         }
     )
     state.notes["traceability_coverage_pct"] = "90"
     state.notes["paper_quality_score"] = "85"
+    state.notes["paper_evidence_gate"] = "passed"
     case = CompetitionCase(
         case_id="case",
         title="case",
@@ -61,6 +63,50 @@ def test_competition_score_rewards_complete_evidence(temp_workspace):
 
     assert score.total == 100
     assert score.failures == []
+
+
+def test_competition_score_penalizes_missing_paper_evidence_gate(temp_workspace):
+    state = WorkflowState("test", [], temp_workspace)
+    state.problem_spec = ProblemSpec(subproblems=[{"id": "Q1", "task_type": "forecast"}])
+    state.model_decision = ModelDecision(
+        primary_model_id="trend_forecast",
+        baseline_model_id="smoothing_forecast",
+    )
+    state.formulation_spec = FormulationSpec(validation_issues=[])
+    experiment = temp_workspace.logs_dir / "experiment_report.json"
+    experiment.write_text(
+        json.dumps(
+            {
+                "gate": {"passed": True},
+                "executed_validation": {"status": "completed"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    state.artifacts.update(
+        {
+            "problem_spec": experiment,
+            "model_selection_report": experiment,
+            "formulation_spec": experiment,
+            "experiment_report": experiment,
+            "claim_evidence_map": experiment,
+            "paper": experiment,
+        }
+    )
+    state.notes["traceability_coverage_pct"] = "90"
+    state.notes["paper_quality_score"] = "85"
+    case = CompetitionCase(
+        case_id="case",
+        title="case",
+        expected_task_types=("forecast",),
+        acceptable_primary_models=("trend_forecast",),
+    )
+
+    score = evaluate_competition_case(case, state)
+
+    assert score.total < 100
+    assert "paper evidence gate failed or missing" in score.failures
+    assert score.dimensions["paper_evidence_gate"] == 0
 
 
 def test_benchmark_case_file_is_valid():

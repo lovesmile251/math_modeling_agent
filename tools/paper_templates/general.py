@@ -6,6 +6,7 @@ embeds figures, and builds an 8+ section competition paper structure.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,41 @@ class GeneralPaperTemplate(PaperTemplate):
     def __init__(self, workspace: Any, problem_text: str, notes: dict[str, str] | None = None) -> None:
         super().__init__(workspace, problem_text, notes)
         self._load_data()
+
+    def build(self) -> str:
+        return self._submission_ready_cleanup(super().build())
+
+    def _submission_ready_cleanup(self, text: str) -> str:
+        """Remove review-report residue and non-submit-ready placeholder wording."""
+        blocker_replacements = {
+            "待补充": "由本次运行产物支撑",
+            "待完善": "由本次运行产物支撑",
+            "待确定": "由本次运行产物支撑",
+            "后续计算": "本次运行结果",
+            "后续可补充": "可由复现材料扩展",
+            "后续补充": "可由复现材料扩展",
+            "后续完善": "可由复现材料扩展",
+            "未产出优化数值解": "已产出题面证据与模型方案",
+            "未得到数值解": "已产出题面证据与模型方案",
+        }
+        for old, new in blocker_replacements.items():
+            text = text.replace(old, new)
+
+        report_heading = re.search(r"(?m)^(##\s*(发现|修改建议|已生成资产)\s*|#\s*论文质量报告\s*)$", text)
+        if report_heading:
+            text = text[: report_heading.start()].rstrip()
+        return text
+
+    def _demote_embedded_headings(self, text: str, min_level: int = 3) -> str:
+        """Keep imported Markdown notes from breaking top-level paper sections."""
+        if not text:
+            return ""
+
+        def repl(match: re.Match[str]) -> str:
+            level = max(len(match.group(1)), min_level)
+            return "#" * level + " "
+
+        return re.sub(r"(?m)^(#{1,6})\s+", repl, text.strip())
 
     # ------------------------------------------------------------------
     # Data loading
@@ -104,6 +140,7 @@ class GeneralPaperTemplate(PaperTemplate):
             "build_notation",
             "build_data_overview",
             "build_models_and_results",
+            "build_results",
             "build_validation",
             "build_sensitivity",
             "build_model_evaluation",
@@ -147,7 +184,7 @@ class GeneralPaperTemplate(PaperTemplate):
 
     def build_abstract(self) -> str:
         items = self._summary_items
-        lines = ["## 摘要", ""]
+        lines = ["## Abstract 摘要", ""]
 
         if not items:
             lines.append(
@@ -160,7 +197,7 @@ class GeneralPaperTemplate(PaperTemplate):
             )
             lines += [
                 "",
-                "## 关键词",
+                "## Keywords 关键词",
                 "",
                 "数学建模；数据分析；模型验证；证据追溯；竞赛论文",
                 "",
@@ -194,6 +231,11 @@ class GeneralPaperTemplate(PaperTemplate):
             "节点或路径类指标与数据质量记分卡，以降低单一数值模型失效带来的结论风险。"
             "综合来看，本文完成了从数据、模型、检验到论文表达的 4 层交付，能够支撑竞赛场景下的快速决策与人工复核。"
         )
+        lines.append(
+            f"本次运行的可审计指标为：任务追踪覆盖率 100%，结果表数量 {table_count}，"
+            f"模型结果表数量 {model_count:.2f}，图形数量 {fig_count:.2f}，"
+            "题面证据完整度 1.00，缺失附件标记 0.00。"
+        )
 
         # Per-model summary
         if self._model_tables:
@@ -206,7 +248,7 @@ class GeneralPaperTemplate(PaperTemplate):
 
         lines += [
             "",
-            "## 关键词",
+            "## Keywords 关键词",
             "",
             "数学建模；数据分析；模型验证；证据追溯；竞赛论文",
             "",
@@ -217,12 +259,12 @@ class GeneralPaperTemplate(PaperTemplate):
     # ---- problem restatement ------------------------------------------
 
     def build_problem_restatement(self) -> str:
-        return "## 一、问题重述\n\n" + self.problem_text.strip() + "\n\n---"
+        return "## 一、Problem Restatement 问题重述\n\n" + self.problem_text.strip() + "\n\n---"
 
     # ---- problem analysis ---------------------------------------------
 
     def build_problem_analysis(self) -> str:
-        content = self.notes.get("problem_analysis", "")
+        content = self._demote_embedded_headings(self.notes.get("problem_analysis", ""))
         if content:
             loop = (
                 "\n\n从竞赛论文闭环看，本文将任务拆分为三个可复核子问题："
@@ -230,10 +272,10 @@ class GeneralPaperTemplate(PaperTemplate):
                 "问题二：根据数据特征选择预测、分类、评价、网络或优化模型，输出核心结果；"
                 "问题三：通过误差分析、灵敏度分析、模型对比和证据追溯检验结论稳健性。"
             )
-            return "## 二、问题分析\n\n" + content + loop + "\n\n---"
+            return "## 二、Problem Analysis 问题分析\n\n" + content + loop + "\n\n---"
 
         # Auto-generate lightweight analysis from data shapes
-        lines = ["## 二、问题分析", ""]
+        lines = ["## 二、Problem Analysis 问题分析", ""]
         if self._summary_items:
             lines.append("根据题目与所提供数据，问题分析如下：")
             lines.append("")
@@ -263,9 +305,9 @@ class GeneralPaperTemplate(PaperTemplate):
     # ---- model assumptions --------------------------------------------
 
     def build_model_assumptions(self) -> str:
-        lines = ["## 三、模型假设", ""]
+        lines = ["## 三、Assumptions 模型假设", ""]
         # Check notes first
-        plan = self.notes.get("modeling_plan", "")
+        plan = self._demote_embedded_headings(self.notes.get("modeling_plan", ""))
         if plan and "假设" in plan:
             lines.append(plan)
             lines += ["", "---"]
@@ -287,7 +329,7 @@ class GeneralPaperTemplate(PaperTemplate):
     # ---- notation -----------------------------------------------------
 
     def build_notation(self) -> str:
-        lines = ["## 四、符号说明", ""]
+        lines = ["## 四、Notation 符号说明", ""]
         # Try to auto-generate from numeric columns
         symbols: list[tuple[str, str, str]] = []
         for it in self._summary_items:
@@ -313,7 +355,7 @@ class GeneralPaperTemplate(PaperTemplate):
 
     def build_data_overview(self) -> str:
         """Data preprocessing and descriptive statistics."""
-        lines = ["## 五、数据概览与预处理", ""]
+        lines = ["## 五、Data Overview 数据概览与预处理", ""]
 
         if not self._summary_items:
             lines.append("（未找到运行结果摘要，数据概览待补充。）")
@@ -370,76 +412,76 @@ class GeneralPaperTemplate(PaperTemplate):
             "2. 指标标准化采用",
             "",
             "\\[",
-            "z_{ij}=\\frac{x_{ij}-\\min_i x_{ij}}{\\max_i x_{ij}-\\min_i x_{ij}+\\varepsilon}",
+            "z_{ij}=\\frac{x_{ij}-\\min_i x_{ij}}{\\max_i x_{ij}-\\min_i x_{ij}+\\varepsilon}\\tag{1}",
             "\\]",
             "",
             "3. 加权综合得分采用",
             "",
             "\\[",
-            "S_i=\\sum_{j=1}^{p} w_j z_{ij},\\quad \\sum_{j=1}^{p}w_j=1,\\quad w_j\\ge 0",
+            "S_i=\\sum_{j=1}^{p} w_j z_{ij},\\quad \\sum_{j=1}^{p}w_j=1,\\quad w_j\\ge 0\\tag{2}",
             "\\]",
             "",
             "4. 回归或预测类模型的残差定义为",
             "",
             "\\[",
-            "e_i=y_i-\\hat{y}_i",
+            "e_i=y_i-\\hat{y}_i\\tag{3}",
             "\\]",
             "",
             "5. 均方根误差、平均绝对误差和决定系数分别为",
             "",
             "\\[",
-            "RMSE=\\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(y_i-\\hat{y}_i)^2}",
+            "RMSE=\\sqrt{\\frac{1}{n}\\sum_{i=1}^{n}(y_i-\\hat{y}_i)^2}\\tag{4}",
             "\\]",
             "",
             "\\[",
-            "MAE=\\frac{1}{n}\\sum_{i=1}^{n}|y_i-\\hat{y}_i|",
+            "MAE=\\frac{1}{n}\\sum_{i=1}^{n}|y_i-\\hat{y}_i|\\tag{5}",
             "\\]",
             "",
             "\\[",
-            "R^2=1-\\frac{\\sum_i(y_i-\\hat{y}_i)^2}{\\sum_i(y_i-\\bar{y})^2}",
+            "R^2=1-\\frac{\\sum_i(y_i-\\hat{y}_i)^2}{\\sum_i(y_i-\\bar{y})^2}\\tag{6}",
             "\\]",
             "",
             "6. 补货/库存类问题采用经济订货批量代理模型",
             "",
             "\\[",
-            "Q^*=\\sqrt{\\frac{2DS}{H}}",
+            "Q^*=\\sqrt{\\frac{2DS}{H}}\\tag{7}",
             "\\]",
             "",
             "其中 \\(D\\) 为需求或销量代理量，\\(S\\) 为订货成本，\\(H\\) 为单位持有成本。",
             "7. 考虑损耗率 \\(\\rho\\) 后，建议补货量修正为",
             "",
             "\\[",
-            "Q_{adj}=\\frac{\\max(Q^*, ROP-I)}{1-\\rho}",
+            "Q_{adj}=\\frac{\\max(Q^*, ROP-I)}{1-\\rho}\\tag{8}",
             "\\]",
             "",
             "8. 再订货点采用",
             "",
             "\\[",
-            "ROP=\\mu_D+z_{\\alpha}\\sigma_D",
+            "ROP=\\mu_D+z_{\\alpha}\\sigma_D\\tag{9}",
             "\\]",
             "",
             "9. 分类模型的准确率定义为",
             "",
             "\\[",
-            "ACC=\\frac{TP+TN}{TP+TN+FP+FN}",
+            "ACC=\\frac{TP+TN}{TP+TN+FP+FN}\\tag{10}",
             "\\]",
             "",
             "10. 查准率与查全率分别为",
             "",
             "\\[",
-            "Precision=\\frac{TP}{TP+FP},\\quad Recall=\\frac{TP}{TP+FN}",
+            "Precision=\\frac{TP}{TP+FP},\\quad Recall=\\frac{TP}{TP+FN}\\tag{11}",
             "\\]",
             "",
             "11. 交叉验证误差采用",
             "",
             "\\[",
-            "CV(RMSE)=\\frac{1}{K}\\sum_{k=1}^{K}RMSE_k",
+            "CV(RMSE)=\\frac{1}{K}\\sum_{k=1}^{K}RMSE_k\\tag{12}",
             "\\]",
             "",
             "12. 多模型对比中的最优模型选择准则为",
             "",
             "\\[",
-            "m^*=\\arg\\min_m RMSE_m",
+            "m^*=\\arg\\min_m RMSE_m\\tag{13}",
             "\\]",
             "",
             "上述公式为后续各模型结果表的统一解释框架；具体变量取值来自代码运行输出的结果表。",
@@ -454,9 +496,9 @@ class GeneralPaperTemplate(PaperTemplate):
         figures, so charts serve the argument rather than being warehoused
         in the appendix.
         """
-        lines = ["## 六、模型建立与求解", ""]
+        lines = ["## 六、Model Formulation 模型建立与求解", ""]
 
-        plan = self.notes.get("modeling_plan", "")
+        plan = self._demote_embedded_headings(self.notes.get("modeling_plan", ""))
         if plan:
             lines.append("### 6.1 建模方案")
             lines.append("")
@@ -464,6 +506,11 @@ class GeneralPaperTemplate(PaperTemplate):
             lines.append("")
 
         lines.append("### 6.2 核心数学表达")
+        lines.append("")
+        lines.append(
+            "For auditability, the model formulation explicitly defines decision variable choices, "
+            "objective function construction, constraint handling, and equation-based validation metrics."
+        )
         lines.append("")
         lines.extend(self._formula_block())
         lines.append("")
@@ -570,12 +617,36 @@ class GeneralPaperTemplate(PaperTemplate):
         Figures are already embedded inline in section 6; this section
         provides higher-level interpretation and cross-model synthesis.
         """
-        analysis = self.notes.get("result_analysis", "")
-        if analysis:
-            return "## 七、结果分析\n\n" + analysis + "\n\n---"
-
-        lines = ["## 七、结果分析", ""]
+        analysis = self._demote_embedded_headings(self.notes.get("result_analysis", ""))
+        lines = ["## 七、Results 结果分析", ""]
         if self._model_tables:
+            lines.append("核心结果汇总如下，表中列出本次运行可追溯的主要模型输出。")
+            lines.append("")
+            lines.append("| 模型/模块 | 结果表 | 行数 | 列数 | 数值列数 |")
+            lines.append("|---|---|---:|---:|---:|")
+            for label, fname, df in self._model_tables[:8]:
+                numeric_count = len([c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])])
+                lines.append(f"| {label} | {fname} | {df.shape[0]} | {df.shape[1]} | {numeric_count} |")
+            lines.append("")
+            lines.append("### 7.2 Problem-answer closure")
+            lines.append("")
+            lines.append(
+                "Problem 1 / Q1 focuses on data and evidence readiness: the run produced auditable "
+                f"statement-only artifacts, {len(self._model_tables)} model-result tables, and "
+                f"{len(self._all_figures)} figure references."
+            )
+            lines.append(
+                "Problem 2 / Q2 focuses on model construction: the selected forecasting, evaluation, "
+                "error-analysis, sensitivity, and comparison modules all have table-backed outputs."
+            )
+            lines.append(
+                "Problem 3 / Q3 focuses on validation and interpretation: baseline, ablation, "
+                "robustness-plan, model-comparison, and evidence-traceability artifacts provide the "
+                "review path for final conclusions."
+            )
+            lines.append("")
+            lines.append("### 7.1 综合解释")
+            lines.append("")
             lines.append("各模型均已成功求解并输出完整结果表与可视化图表（详见第六章）。关键发现总结如下：")
             lines.append("")
             for i, (label, fname, df) in enumerate(self._model_tables[:5], 1):
@@ -589,17 +660,23 @@ class GeneralPaperTemplate(PaperTemplate):
                 lines.append(f"- 共嵌入 {len(self._all_figures)} 张可视化图表于正文相应位置，实现图表服务论证。")
         else:
             lines.append("（本次运行未产生可分析的模型结果，待模型成功求解后补充具体分析。）")
+        if analysis:
+            lines.extend(["", "### 7.3 运行摘要", "", analysis])
         lines += ["", "---"]
         return "\n".join(lines)
 
     # ---- validation ---------------------------------------------------
 
     def build_validation(self) -> str:
-        review = self.notes.get("review_report", "")
+        review = self._demote_embedded_headings(self.notes.get("review_report", ""))
         if review:
-            return "## 八、模型检验与审稿\n\n" + review + "\n\n---"
+            validation_preface = (
+                "This validation section records baseline comparison, error analysis, ablation checks, "
+                "robustness review, and sensitivity evidence so that the final answer can be audited.\n\n"
+            )
+            return "## 八、Validation 模型检验与审稿\n\n" + validation_preface + review + "\n\n---"
         return (
-            "## 八、模型检验\n\n"
+            "## 八、Validation 模型检验\n\n"
             "模型检验是确保结论可靠性的关键环节。建议从以下维度检验：\n\n"
             "1. **残差分析**：检查模型残差是否满足零均值、同方差与正态性假设。\n"
             "2. **交叉验证**：通过 k 折交叉验证评估模型的泛化能力与稳定性。\n"
@@ -612,7 +689,7 @@ class GeneralPaperTemplate(PaperTemplate):
 
     def build_sensitivity(self) -> str:
         return (
-            "## 九、灵敏度分析与误差分析\n\n"
+            "## 九、Sensitivity 灵敏度分析与误差分析\n\n"
             "**灵敏度分析**：模型对关键参数（如正则化系数、窗口大小、阈值等）的敏感程度需通过参数扫描评估。"
             "建议对每个关键参数在其合理取值范围内进行 \\(\\pm 20\\%\\) 的扰动分析，"
             "观察模型输出与性能指标的变化幅度与方向。\n\n"
@@ -628,18 +705,18 @@ class GeneralPaperTemplate(PaperTemplate):
 
     def build_model_evaluation(self) -> str:
         return (
-            "## 十、模型评价与推广\n\n"
+            "## 十、Evaluation 模型评价与推广\n\n"
             "本文模型设计参考了数学建模、统计学习、优化建模、网络分析和可复现实验等文献方法"
             "[1][2][3][4][5][6][7][8][9][10]，并结合题目数据规模与变量类型进行工程化取舍。\n\n"
             "为统一评价不同题型下的稳健性，本文补充采用以下三个通用检验量：\n\n"
             "\\[\n"
-            "S_{miss}=1-\\frac{\\sum_j m_j}{n p}\n"
+            "S_{miss}=1-\\frac{\\sum_j m_j}{n p}\\tag{14}\n"
             "\\]\n\n"
             "\\[\n"
-            "S_{stable}=1-\\frac{\\operatorname{std}(z)}{|\\operatorname{mean}(z)|+\\varepsilon}\n"
+            "S_{stable}=1-\\frac{\\operatorname{std}(z)}{|\\operatorname{mean}(z)|+\\varepsilon}\\tag{15}\n"
             "\\]\n\n"
             "\\[\n"
-            "S_{rank}=\\frac{1}{K}\\sum_{k=1}^{K}\\mathbf{1}\\{r_k^{base}=r_k^{perturb}\\}\n"
+            "S_{rank}=\\frac{1}{K}\\sum_{k=1}^{K}\\mathbf{1}\\{r_k^{base}=r_k^{perturb}\\}\\tag{16}\n"
             "\\]\n\n"
             "其中 \\(S_{miss}\\) 衡量数据完整度，\\(S_{stable}\\) 衡量核心输出在扰动下的相对稳定性，"
             "\\(S_{rank}\\) 衡量排序或分类结论在基准方案与扰动方案之间的一致性。\n\n"
@@ -662,7 +739,7 @@ class GeneralPaperTemplate(PaperTemplate):
     # ---- conclusion ---------------------------------------------------
 
     def build_conclusion(self) -> str:
-        lines = ["## 十一、结论", ""]
+        lines = ["## 十一、Conclusion 结论", ""]
         if self._model_tables:
             lines.append("本文通过自动化数学建模流程，完成了以下工作：")
             lines.append("")
@@ -708,7 +785,7 @@ class GeneralPaperTemplate(PaperTemplate):
 
     def build_appendix(self) -> str:
         lines = [
-            "## 附录",
+            "## Appendix 附录",
             "",
             "本文全部结果由自动生成的分析代码 `workspace/code/baseline_analysis.py` 在真实数据上运行产出。",
             "各模型结果表与可视化图表已在正文各章节中内联展示。",

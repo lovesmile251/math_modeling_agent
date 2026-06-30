@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tools.real_case_drill import _load_model_feedback, run_real_case_drill
+from app.config import WorkspaceConfig
+from tools.real_case_drill import _load_model_feedback, _reset_workspace_outputs, run_real_case_drill
 
 
 def test_real_case_drill_runs_full_workflow(tmp_path: Path, sample_dataframe):
@@ -179,3 +180,18 @@ def test_real_case_drill_feedback_ignores_graph_case_scheduling_mismatch(tmp_pat
     assert feedback["produced_models"] == ["graph_shortest_paths"]
     assert feedback["empty_models"] == []
     assert feedback["missing_models"] == []
+
+
+def test_real_case_drill_reset_removes_stale_case_outputs(tmp_path: Path):
+    workspace = WorkspaceConfig.from_root(tmp_path / "runs" / "case-a", project_root=tmp_path)
+    workspace.ensure_dirs()
+    stale_table = workspace.tables_dir / "old_result.csv"
+    stale_figure = workspace.figures_dir / "old_result.png"
+    stale_table.write_text("x\n1\n", encoding="utf-8")
+    stale_figure.write_bytes(b"not-a-real-png")
+
+    _reset_workspace_outputs(workspace)
+
+    assert not stale_table.exists()
+    assert not stale_figure.exists()
+    assert workspace.tables_dir.exists()

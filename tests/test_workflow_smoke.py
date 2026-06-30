@@ -5,6 +5,8 @@ import json
 import workflows.modeling_workflow as wf
 from agents.base import (
     A_PAPER,
+    A_PAPER_DOCX_LAYOUT_REPORT,
+    A_PAPER_EVIDENCE_AUDIT,
     FormulationSpec,
     ModelDecision,
     ResultRegistry,
@@ -70,6 +72,11 @@ def test_export_paper_standalone(project_rooted_workspace):
     assert set(results.keys()) == {"docx", "pdf", "latex"}
     for path in results.values():
         assert path.exists()
+    docx_layout_report = project_rooted_workspace.paper_dir / "docx_template_layout_report.json"
+    assert docx_layout_report.exists()
+    payload = json.loads(docx_layout_report.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert any(item["role"] == "title" for item in payload["field_mapping"])
 
 
 def test_export_agent_blocks_formal_export_for_submission_blockers(project_rooted_workspace):
@@ -90,9 +97,33 @@ def test_export_agent_blocks_formal_export_for_submission_blockers(project_roote
     assert state.notes["export_quality_gate"] == "failed"
     assert "Paper quality gate failed" in state.notes["export_errors"]
     assert "Submission blocker" in state.notes["export_blocking_issues"]
+    assert state.notes["paper_evidence_gate"] == "failed"
+    assert A_PAPER_EVIDENCE_AUDIT in state.artifacts
+    assert state.artifacts[A_PAPER_EVIDENCE_AUDIT].exists()
+    assert (project_rooted_workspace.logs_dir / "paper_evidence_audit.md").exists()
+    assert A_PAPER_DOCX_LAYOUT_REPORT not in state.artifacts
     assert "paper_docx" not in state.artifacts
     assert "paper_pdf" not in state.artifacts
     assert "paper_latex" not in state.artifacts
+
+
+def test_export_agent_legacy_claim_traceability_does_not_skip_formal_gates(project_rooted_workspace):
+    paper_path = project_rooted_workspace.paper_dir / "paper_draft.md"
+    paper_path.write_text(
+        "# Paper\n\n## Abstract\nThis draft has one unsupported result.\n\n## Results\nNo table yet.\n",
+        encoding="utf-8",
+    )
+    state = WorkflowState(problem_text="test", data_files=[], workspace=project_rooted_workspace)
+    state.artifacts[A_PAPER] = paper_path
+    state.notes["traceability_gate"] = "failed"
+
+    state = ExportAgent(formats=["docx"]).run(state)
+
+    assert state.notes["export_quality_gate"] == "failed"
+    assert state.notes["paper_evidence_gate"] == "failed"
+    assert state.artifacts[A_PAPER_EVIDENCE_AUDIT].exists()
+    assert "Traceability gate failed" not in state.notes["export_errors"]
+    assert "paper_docx" not in state.artifacts
 
 
 def test_export_agent_blocks_missing_task_paper_binding(project_rooted_workspace):
@@ -295,6 +326,18 @@ def test_run_workspace_uses_isolated_workspace(monkeypatch, tmp_path):
     assert diagnostics["workspace_root"] == str(state.workspace.root)
 
 
+def test_explicit_empty_data_files_disable_auto_discovery(project_rooted_workspace, sample_dataframe):
+    (project_rooted_workspace.data_dir / "sample.csv").write_text(
+        sample_dataframe.to_csv(index=False), encoding="utf-8"
+    )
+    workflow = wf.ModelingWorkflow(use_llm=False, workspace=project_rooted_workspace)
+    workflow.agents = []
+
+    state = workflow.run("statement-only problem", data_files=[])
+
+    assert state.data_files == []
+
+
 def test_workflow_auto_rework_reruns_from_recommended_phase(project_rooted_workspace):
     class FakeExportAgent:
         name = "export_agent"
@@ -335,9 +378,11 @@ def test_workflow_auto_rework_reruns_from_recommended_phase(project_rooted_works
     report = json.loads(state.artifacts["auto_rework_report"].read_text(encoding="utf-8"))
     assert report["status"] == "resolved"
     assert report["initial_route"]["target_phase"] == WorkflowPhase.SECTION_WRITING.value
+    assert report["repair_hints"]
     assert report["before_gates"]["export_quality_gate"] == "failed"
     assert report["after_gates"]["export_quality_gate"] == "passed"
     assert "自动返工报告" in state.artifacts["auto_rework_report_md"].read_text(encoding="utf-8")
+    assert "Repair Hints" in state.artifacts["auto_rework_report_md"].read_text(encoding="utf-8")
     summary = json.loads(state.artifacts["workflow_gate_summary"].read_text(encoding="utf-8"))
     assert summary["gates"]["export_quality_gate"] == "passed"
 

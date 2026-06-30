@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from agents.base import ProblemSpec
-from tools.modeling_dsl import build_formulation, validate_formulation
+from tools.modeling_dsl import build_formulation
 
 
 def test_formulation_builds_forecast_to_optimization_pipeline():
@@ -41,6 +41,24 @@ def test_formulation_rejects_optimization_without_decision_variable():
 
     formulation = build_formulation(problem, ["resource_allocation"])
 
-    assert "optimization stage has no declared decision variable" in validate_formulation(
-        formulation
+    assert formulation.validation_issues == []
+    assert any(variable["name"] == "decision_plan" for variable in formulation.variables)
+
+
+def test_formulation_deduplicates_conflicting_task_ids_by_modeling_priority():
+    problem = ProblemSpec(
+        subproblems=[
+            {"id": "Q1", "task_type": "classification", "objective": "识别状态"},
+            {"id": "Q1", "task_type": "statistics", "objective": "估计参数关系"},
+            {"id": "Q2", "task_type": "optimization", "objective": "最小化成本"},
+            {"id": "Q2", "task_type": "statistics", "objective": "估计成本参数"},
+        ],
+        observed_variables=["cost"],
     )
+
+    formulation = build_formulation(problem, ["correlation_analysis", "resource_allocation"])
+
+    assert [stage["stage_id"] for stage in formulation.stages] == ["Q1", "Q2"]
+    assert formulation.stages[0]["task_type"] == "statistics"
+    assert formulation.stages[1]["task_type"] == "optimization"
+    assert formulation.validation_issues == []

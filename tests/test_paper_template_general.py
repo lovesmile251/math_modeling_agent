@@ -5,6 +5,7 @@ import json
 import pandas as pd
 
 from tools.paper_templates.general import GeneralPaperTemplate
+from tools.paper_evidence_audit import audit_paper_evidence_density
 
 
 def test_general_template_handles_model_runs_and_nan_describe(temp_workspace):
@@ -53,4 +54,8 @@ def test_general_template_handles_model_runs_and_nan_describe(temp_workspace):
     assert "核心数学表达" in paper
     assert "inventory_policy" in paper
     assert "suggested_replenishment" in paper
+    assert "核心结果汇总" in paper
+    assert "| 模型/模块 | 结果表 | 行数 | 列数 | 数值列数 |" in paper
     assert paper.count("\\[") >= 8
+    audit = audit_paper_evidence_density(paper, workspace_root=temp_workspace.root)
+    assert audit.metrics["result_section_table_rows"] > 0

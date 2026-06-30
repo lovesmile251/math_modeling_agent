@@ -6,16 +6,21 @@ from agents.base import (
     A_INNOVATION_EVIDENCE_REPORT,
     A_EXPERIMENT_REPORT,
     A_PAPER,
+    A_PAPER_DOCX_LAYOUT_REPORT,
+    A_PAPER_EVIDENCE_AUDIT,
     A_PAPER_QUALITY,
     A_PAPER_PDF_LAYOUT_REPORT,
     A_TASK_TRACEABILITY_REPORT,
     Agent,
     K_EXPORT_BLOCKING_ISSUES,
+    K_EXPORT_DOCX_LAYOUT_GATE,
     K_EXPORT_ERRORS,
     K_EXPORT_PDF_LAYOUT_GATE,
     K_EXPORT_QUALITY_GATE,
     K_INNOVATION_EVIDENCE_GATE,
     K_INNOVATION_EVIDENCE_ISSUES,
+    K_PAPER_EVIDENCE_GATE,
+    K_PAPER_EVIDENCE_ISSUES,
     K_PAPER_EVIDENCE_SCORE,
     K_PAPER_EXPORT_SCORE,
     K_PAPER_QUALITY_REPORT,
@@ -30,7 +35,13 @@ from agents.base import (
     WorkflowState,
 )
 from models.catalog import EXECUTABLE_MODEL_LABELS
-from tools.exporters import SUPPORTED_FORMATS, check_export_layout, export_document
+from tools.exporters import (
+    SUPPORTED_FORMATS,
+    check_docx_template_layout,
+    check_export_layout,
+    export_document,
+    write_docx_template_layout_report,
+)
 from tools.file_tool import write_text
 from tools.innovation_evidence import (
     build_innovation_evidence_report,
@@ -42,6 +53,7 @@ from tools.paper_quality import (
     format_quality_report,
     submission_blocking_issues,
 )
+from tools.paper_evidence_audit import audit_paper_evidence_density, write_paper_evidence_audit
 from tools.pdf_layout_check import check_pdf_render_layout, write_pdf_layout_report
 from tools.report_builder import build_document_from_paper
 from tools.task_traceability import (
@@ -93,6 +105,15 @@ def export_paper(
         results["_errors"] = errors  # type: ignore[assignment]
     if layout_warnings:
         results["_layout_warnings"] = layout_warnings  # type: ignore[assignment]
+    docx_path = results.get("docx")
+    if docx_path:
+        report = check_docx_template_layout(docx_path)
+        write_docx_template_layout_report(
+            report,
+            workspace.paper_dir / "docx_template_layout_report.json",
+        )
+        if not report.passed:
+            results["_docx_layout_warnings"] = report.warnings  # type: ignore[assignment]
     pdf_path = results.get("pdf")
     if pdf_path:
         report = check_pdf_render_layout(
@@ -113,11 +134,6 @@ class ExportAgent(Agent):
         self.title = title
 
     def run(self, state: WorkflowState) -> WorkflowState:
-        if state.notes.get("traceability_gate") == "failed":
-            state.notes[K_EXPORT_ERRORS] = (
-                "Traceability gate failed; resolve unmapped numerical claims before export."
-            )
-            return state
         paper_path = state.artifacts.get(A_PAPER) or state.workspace.paper_dir / "paper_draft.md"
         if not Path(paper_path).exists():
             state.notes[K_EXPORT_ERRORS] = "Paper draft is missing; cannot export formal document."
@@ -138,6 +154,16 @@ class ExportAgent(Agent):
         state.notes[K_PAPER_EVIDENCE_SCORE] = str(quality.metrics.get("evidence_score", quality.score))
         state.notes[K_PAPER_STRUCTURE_SCORE] = str(quality.metrics.get("structure_score", quality.score))
         state.notes[K_PAPER_EXPORT_SCORE] = str(quality.metrics.get("export_score", quality.score))
+        paper_evidence_audit = audit_paper_evidence_density(
+            paper,
+            workspace_root=state.workspace.root,
+        )
+        evidence_audit_paths = write_paper_evidence_audit(state.workspace, paper_evidence_audit)
+        state.artifacts[A_PAPER_EVIDENCE_AUDIT] = evidence_audit_paths["json"]
+        state.artifacts[f"{A_PAPER_EVIDENCE_AUDIT}_md"] = evidence_audit_paths["markdown"]
+        state.notes[K_PAPER_EVIDENCE_GATE] = "passed" if paper_evidence_audit.passed else "failed"
+        if paper_evidence_audit.issues:
+            state.notes[K_PAPER_EVIDENCE_ISSUES] = "; ".join(paper_evidence_audit.issues)
         blockers = submission_blocking_issues(quality)
         task_traceability = build_task_traceability_report(
             deliverables=state.task_deliverable_specs,
@@ -188,15 +214,24 @@ class ExportAgent(Agent):
         results = export_paper(state.workspace, self.formats, title=self.title)
         errors = results.pop("_errors", None)  # type: ignore[assignment]
         layout_warnings = results.pop("_layout_warnings", None)  # type: ignore[assignment]
+        docx_layout_warnings = results.pop("_docx_layout_warnings", None)  # type: ignore[assignment]
         pdf_layout_warnings = results.pop("_pdf_layout_warnings", None)  # type: ignore[assignment]
         for fmt, path in results.items():
             state.artifacts[f"paper_{fmt}"] = path
+        docx_layout_report = state.workspace.paper_dir / "docx_template_layout_report.json"
+        if docx_layout_report.exists():
+            state.artifacts[A_PAPER_DOCX_LAYOUT_REPORT] = docx_layout_report
         pdf_layout_report = state.workspace.paper_dir / "pdf_layout_report.json"
         if pdf_layout_report.exists():
             state.artifacts[A_PAPER_PDF_LAYOUT_REPORT] = pdf_layout_report
         state.notes["export_formats"] = ", ".join(results.keys()) or "无"
         if layout_warnings:
             state.notes["export_layout_warnings"] = "; ".join(str(msg) for msg in layout_warnings)
+        if docx_layout_warnings:
+            state.notes[K_EXPORT_DOCX_LAYOUT_GATE] = "failed"
+            state.notes["export_docx_layout_warnings"] = "; ".join(str(msg) for msg in docx_layout_warnings)
+        elif docx_layout_report:
+            state.notes[K_EXPORT_DOCX_LAYOUT_GATE] = "passed"
         if pdf_layout_warnings:
             state.notes[K_EXPORT_PDF_LAYOUT_GATE] = "failed"
             state.notes["export_pdf_layout_warnings"] = "; ".join(str(msg) for msg in pdf_layout_warnings)

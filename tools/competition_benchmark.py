@@ -20,6 +20,7 @@ class CompetitionCase:
         "formulation_spec",
         "experiment_report",
         "claim_evidence_map",
+        "paper_evidence_audit",
         "paper",
     )
     min_traceability_pct: float = 70.0
@@ -85,7 +86,7 @@ def evaluate_competition_case(
 
     traceability = float(state.notes.get("traceability_coverage_pct", "0") or 0)
     dimensions["traceability"] = min(
-        15.0, 15.0 * traceability / max(case.min_traceability_pct, 1)
+        12.0, 12.0 * traceability / max(case.min_traceability_pct, 1)
     )
     if traceability < case.min_traceability_pct:
         failures.append("traceability below threshold")
@@ -96,6 +97,11 @@ def evaluate_competition_case(
     )
     if quality < case.min_paper_quality:
         failures.append("paper quality below threshold")
+
+    paper_evidence_gate = state.notes.get("paper_evidence_gate", "")
+    dimensions["paper_evidence_gate"] = 3.0 if paper_evidence_gate == "passed" else 0.0
+    if paper_evidence_gate != "passed":
+        failures.append("paper evidence gate failed or missing")
 
     present = sum(1 for key in case.required_artifacts if key in state.artifacts)
     dimensions["artifact_completeness"] = (

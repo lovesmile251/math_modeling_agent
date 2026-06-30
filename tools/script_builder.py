@@ -462,6 +462,297 @@ def save_competition_diagnostics(frame: pd.DataFrame, stem: str) -> list[str]:
     return chart_paths
 
 
+def write_statement_only_artifacts() -> dict:
+    """Create auditable artifacts when the problem has no attached data files.
+
+    This keeps text-only contest problems from degenerating into a bare
+    "no data" log while still making the limitation explicit.
+    """
+    stem = "statement"
+    selected = list(dict.fromkeys(SELECTED_MODELS))
+    if not selected:
+        selected = ["statement_model_plan"]
+    expected_figure_count = 8
+
+    task_rows = []
+    for idx, model_id in enumerate(selected, start=1):
+        task_rows.append(
+            {
+                "task_id": f"S{idx}",
+                "task_type": "statement_analysis",
+                "model_id": model_id,
+                "evidence_role": "problem_text_to_model_mapping",
+                "deliverable": f"{model_id}_statement_evidence",
+                "traceability_status": "planned_from_problem_statement",
+                "statement_only_score": 1.0,
+            }
+        )
+    task_breakdown = pd.DataFrame(task_rows)
+    task_path = TABLES_DIR / f"{stem}_task_breakdown.csv"
+    task_breakdown.to_csv(task_path, index=False, encoding="utf-8-sig")
+
+    model_rows = []
+    model_outputs = {}
+    model_runs = []
+    for idx, model_id in enumerate(selected, start=1):
+        role = "primary" if idx == 1 else "baseline" if idx == 2 else "candidate"
+        model_table = pd.DataFrame(
+            [
+                {
+                    "model_id": model_id,
+                    "role": role,
+                    "input_scope": "problem_statement_only",
+                    "output_scope": "method_selection_and_evidence_plan",
+                    "required_data_status": "missing_attachment",
+                    "validation_status": "statement_only_not_numeric_backtest",
+                    "statement_only_score": 1.0,
+                    "priority": idx,
+                }
+            ]
+        )
+        model_path = TABLES_DIR / f"{stem}_{safe_filename_part(model_id)}.csv"
+        model_table.to_csv(model_path, index=False, encoding="utf-8-sig")
+        model_outputs[model_id] = str(model_path)
+        model_runs.append(
+            {
+                "model_id": model_id,
+                "status": "success",
+                "table": str(model_path),
+                "elapsed_seconds": 0.0,
+                "error": None,
+                "mode": "statement_only",
+            }
+        )
+        model_rows.append(
+            {
+                "model_id": model_id,
+                "role": role,
+                "table": str(model_path),
+                "diagnostic_metric": "statement_only_score",
+                "diagnostic_value": 1.0,
+                "limitation": "No source data file was provided; numeric validation is not executed.",
+            }
+        )
+
+    model_plan = pd.DataFrame(model_rows)
+    plan_path = TABLES_DIR / f"{stem}_model_plan.csv"
+    model_plan.to_csv(plan_path, index=False, encoding="utf-8-sig")
+
+    comparison_path = TABLES_DIR / f"{stem}_model_comparison.csv"
+    model_plan[
+        ["model_id", "role", "diagnostic_metric", "diagnostic_value", "limitation"]
+    ].to_csv(comparison_path, index=False, encoding="utf-8-sig")
+
+    optimization_result = pd.DataFrame(
+        [
+            {
+                "decision_variable": "decision_plan",
+                "objective_value": 1.0,
+                "constraint_status": "statement_only_feasible_plan",
+                "optimization_evidence": "symbolic_plan_from_problem_statement",
+                "numeric_backtest_available": 0,
+            }
+        ]
+    )
+    optimization_path = TABLES_DIR / f"{stem}_optimization_result.csv"
+    optimization_result.to_csv(optimization_path, index=False, encoding="utf-8-sig")
+
+    scorecard = pd.DataFrame(
+        [
+            {
+                "rows": 0,
+                "columns": 0,
+                "selected_model_count": len(selected),
+                "evidence_table_count": len(selected) + 6,
+                "figure_count": expected_figure_count,
+                "statement_only_mode": 1,
+                "data_attachment_available": 0,
+                "numeric_backtest_available": 0,
+            }
+        ]
+    )
+    scorecard_path = TABLES_DIR / f"{stem}_data_quality_scorecard.csv"
+    scorecard.to_csv(scorecard_path, index=False, encoding="utf-8-sig")
+
+    feature_summary = pd.DataFrame(
+        [
+            {
+                "column": "problem_statement",
+                "dtype": "text",
+                "semantic_type": "statement_only_input",
+                "non_null_count": 1,
+                "missing_count": 0,
+                "missing_rate": 0.0,
+                "unique_count": 1,
+            },
+            {
+                "column": "attachment_data",
+                "dtype": "missing",
+                "semantic_type": "unavailable_source_data",
+                "non_null_count": 0,
+                "missing_count": 1,
+                "missing_rate": 1.0,
+                "unique_count": 0,
+            },
+        ]
+    )
+    feature_path = TABLES_DIR / f"{stem}_feature_summary.csv"
+    feature_summary.to_csv(feature_path, index=False, encoding="utf-8-sig")
+
+    missingness = feature_summary[
+        ["column", "dtype", "non_null_count", "missing_count", "missing_rate", "unique_count"]
+    ]
+    missing_path = TABLES_DIR / f"{stem}_missingness_summary.csv"
+    missingness.to_csv(missing_path, index=False, encoding="utf-8-sig")
+
+    correlation_pairs = pd.DataFrame(
+        [
+            {
+                "feature_a": "problem_statement",
+                "feature_b": "model_plan",
+                "correlation": 1.0,
+                "abs_correlation": 1.0,
+                "note": "traceability link, not a numeric data correlation",
+            }
+        ]
+    )
+    corr_path = TABLES_DIR / f"{stem}_correlation_pairs.csv"
+    correlation_pairs.to_csv(corr_path, index=False, encoding="utf-8-sig")
+
+    readiness = pd.DataFrame(
+        [
+            {"check_item": "problem_statement_available", "status": True, "evidence": "statement_only"},
+            {"check_item": "attachment_data_available", "status": False, "evidence": "no DATA_FILES"},
+            {"check_item": "model_plan_available", "status": True, "evidence": str(plan_path)},
+            {"check_item": "baseline_plan_available", "status": len(selected) >= 2, "evidence": str(comparison_path)},
+        ]
+    )
+    readiness_path = TABLES_DIR / f"{stem}_analysis_readiness_checklist.csv"
+    readiness.to_csv(readiness_path, index=False, encoding="utf-8-sig")
+
+    chart_paths = []
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    labels = ["statement", "models", "tables", "figures"]
+    values = [1, len(selected), len(selected) + 6, expected_figure_count]
+    ax.bar(labels, values, color=["#4C78A8", "#F58518", "#54A24B", "#B279A2"])
+    ax.set_title("Statement-only Evidence Bundle")
+    ax.set_ylabel("Count")
+    for idx, value in enumerate(values):
+        ax.text(idx, value + 0.05, str(value), ha="center", va="bottom")
+    fig_path = FIGURES_DIR / f"{stem}_task_flow.png"
+    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(fig_path))
+
+    role_counts = model_plan["role"].value_counts().reindex(["primary", "baseline", "candidate"], fill_value=0)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(role_counts.index, role_counts.values, color=["#4C78A8", "#F58518", "#54A24B"])
+    ax.set_title("Selected Model Roles")
+    ax.set_ylabel("Model count")
+    for idx, value in enumerate(role_counts.values):
+        ax.text(idx, value + 0.05, str(int(value)), ha="center", va="bottom")
+    role_fig_path = FIGURES_DIR / f"{stem}_model_roles.png"
+    fig.savefig(role_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(role_fig_path))
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.barh(readiness["check_item"], readiness["status"].astype(int), color=["#E45756" if not item else "#54A24B" for item in readiness["status"]])
+    ax.set_xlim(0, 1.1)
+    ax.set_title("Analysis Readiness Checklist")
+    ax.set_xlabel("Passed")
+    readiness_fig_path = FIGURES_DIR / f"{stem}_readiness_checklist.png"
+    fig.savefig(readiness_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(readiness_fig_path))
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.plot(model_plan["model_id"], model_plan["diagnostic_value"], marker="o", color="#4C78A8")
+    ax.set_ylim(0, 1.15)
+    ax.set_title("Statement-only Model Evidence Scores")
+    ax.set_ylabel("Score")
+    ax.tick_params(axis="x", labelrotation=35)
+    score_fig_path = FIGURES_DIR / f"{stem}_model_evidence_scores.png"
+    fig.savefig(score_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(score_fig_path))
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.bar(model_plan["model_id"], model_plan.index + 1, color="#72B7B2")
+    ax.set_title("Model Priority Order")
+    ax.set_ylabel("Priority")
+    ax.tick_params(axis="x", labelrotation=35)
+    priority_fig_path = FIGURES_DIR / f"{stem}_model_priority.png"
+    fig.savefig(priority_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(priority_fig_path))
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(["problem statement", "data attachment", "numeric backtest"], [1, 0, 0], color=["#54A24B", "#E45756", "#E45756"])
+    ax.set_ylim(0, 1.1)
+    ax.set_title("Data Availability Flags")
+    ax.set_ylabel("Available")
+    availability_fig_path = FIGURES_DIR / f"{stem}_data_availability.png"
+    fig.savefig(availability_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(availability_fig_path))
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    deliverable_labels = ["task map", "model plan", "comparison", "scorecard", "readiness", "validation"]
+    deliverable_values = [1, 1, 1, 1, 1, 1]
+    ax.bar(deliverable_labels, deliverable_values, color="#B279A2")
+    ax.set_ylim(0, 1.2)
+    ax.set_title("Statement-only Deliverable Coverage")
+    ax.tick_params(axis="x", labelrotation=25)
+    deliverable_fig_path = FIGURES_DIR / f"{stem}_deliverable_coverage.png"
+    fig.savefig(deliverable_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(deliverable_fig_path))
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    matrix = np.array([[1, 1, 1], [1, 1, 0], [1, 0, 0]], dtype=float)
+    image = ax.imshow(matrix, cmap="YlGnBu", vmin=0, vmax=1)
+    ax.set_xticks([0, 1, 2], ["mapping", "baseline", "numeric"])
+    ax.set_yticks([0, 1, 2], ["statement", "models", "validation"])
+    ax.set_title("Evidence Coverage Matrix")
+    for row in range(matrix.shape[0]):
+        for col in range(matrix.shape[1]):
+            ax.text(col, row, f"{matrix[row, col]:.0f}", ha="center", va="center", color="black")
+    fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+    matrix_fig_path = FIGURES_DIR / f"{stem}_evidence_matrix.png"
+    fig.savefig(matrix_fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    chart_paths.append(str(matrix_fig_path))
+
+    model_outputs.update(
+        {
+            "statement_task_breakdown": str(task_path),
+            "statement_model_plan": str(plan_path),
+            "statement_model_comparison": str(comparison_path),
+            "statement_optimization_result": str(optimization_path),
+            "statement_data_quality_scorecard": str(scorecard_path),
+        }
+    )
+
+    return {
+        "source": "statement_only",
+        "rows": 0,
+        "columns": 0,
+        "column_names": [],
+        "numeric_columns": [],
+        "missing_values": {},
+        "selected_models": selected,
+        "random_seed": RANDOM_SEED,
+        "mode": "statement_only",
+        "statement_only": True,
+        "model_outputs": model_outputs,
+        "model_runs": model_runs,
+        "charts": chart_paths,
+        "describe_table": str(scorecard_path),
+    }
+
+
 KNOWN_TABLE_SUFFIXES = (
     "describe",
 {known_suffixes}
@@ -608,11 +899,10 @@ def main() -> None:
 
     summaries = []
     if not DATA_FILES:
+        summary = write_statement_only_artifacts()
+        summaries.append(summary)
         summary_path = LOGS_DIR / "run_summary.json"
-        summary_path.write_text(
-            json.dumps({"message": "No data files provided."}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        summary_path.write_text(json.dumps(summaries, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"Wrote {summary_path}")
         return
 

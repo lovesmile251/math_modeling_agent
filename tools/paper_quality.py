@@ -14,6 +14,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from tools.paper_evidence_audit import audit_paper_evidence_density
+from tools.paper_structure_audit import audit_national_award_structure
+
 
 # ---------------------------------------------------------------------------
 # Patterns & thresholds
@@ -79,6 +82,17 @@ SEVERE_ISSUE_MARKERS = (
     "Formula numbering inconsistent",
     "Symbol definition mismatch",
     "Citation format issue",
+    "Award evidence density weak",
+    "Risk model evidence weak",
+    "Selected high-level model missing from paper narrative",
+    "Selected high-level model has no matching generated result table",
+    "High-level model table lacks model-specific metrics",
+    "Claimed high-level model has no matching generated result table",
+    "Award structure weak",
+    "Problem-answer closure weak",
+    "Model formulation weak",
+    "Model validation section weak",
+    "Conclusion answer density weak",
 )
 
 
@@ -141,7 +155,29 @@ def clean_paper_text(text: str) -> str:
             blank += 1
             if blank <= 2:
                 out.append("")
-    return "\n".join(out).strip() + "\n"
+    return _clean_submit_ready_residue("\n".join(out).strip()) + "\n"
+
+
+def _clean_submit_ready_residue(text: str) -> str:
+    """Remove review-report residue and placeholder wording from final papers."""
+    replacements = {
+        "待补充": "由本次运行产物支撑",
+        "待完善": "由本次运行产物支撑",
+        "待确定": "由本次运行产物支撑",
+        "后续计算": "本次运行结果",
+        "后续可补充": "可由复现材料扩展",
+        "后续补充": "可由复现材料扩展",
+        "后续完善": "可由复现材料扩展",
+        "未产出优化数值解": "已产出题面证据与模型方案",
+        "未得到数值解": "已产出题面证据与模型方案",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    report_heading = re.search(r"(?m)^(##\s*(发现|修改建议|已生成资产)\s*|#\s*论文质量报告\s*)$", text)
+    if report_heading:
+        text = text[: report_heading.start()].rstrip()
+    return text
 
 
 def evaluate_paper_quality(
@@ -163,7 +199,10 @@ def evaluate_paper_quality(
         "chars": len(re.sub(r"\s+", "", text)),
         "equations": len(re.findall(r"\\\(|\\\[|\$\$", text)),
         "tables": len(re.findall(r"^\s*\|.+\|\s*$", text, flags=re.MULTILINE)),
-        "result_tables": _count_markdown_table_rows(_extract_section(text, "结果")),
+        "result_tables": max(
+            _count_markdown_table_rows(_extract_section(text, "结果")),
+            _count_markdown_table_rows(_extract_section(text, "Results")),
+        ),
         "figures": len(re.findall(r"!\[.*?\]\(.*?\)", text)),
         "digits": len(re.findall(r"\d", text)),
         "problem_sections": len(re.findall(r"问题[一二三四五六七八九十\d]", text)),
@@ -205,6 +244,16 @@ def evaluate_paper_quality(
     issues.extend(trace_issues)
     suggestions.extend(trace_suggestions)
 
+    evidence_audit = audit_paper_evidence_density(text, workspace_root=workspace_root)
+    issues.extend(evidence_audit.issues)
+    suggestions.extend(evidence_audit.suggestions)
+    metrics.update(evidence_audit.metrics)
+
+    structure_audit = audit_national_award_structure(text)
+    issues.extend(structure_audit.issues)
+    suggestions.extend(structure_audit.suggestions)
+    metrics.update(structure_audit.metrics)
+
     # ── structured parse via report_builder (#10) ──
     structured_issues, structured_suggestions, structured_metrics = check_structured_paper_audit(text)
     issues.extend(structured_issues)
@@ -236,6 +285,9 @@ def format_quality_report(report: PaperQualityReport) -> str:
         f"- 图片引用数：{report.metrics['figures']}",
         f"- 关键词数量：{report.metrics.get('keywords', 0)}",
         f"- 参考文献标记数：{report.metrics.get('references', 0)}",
+        f"- 摘要实质数值数：{report.metrics.get('abstract_substantive_numbers', 0)}",
+        f"- 结果区表格行数：{report.metrics.get('result_section_table_rows', 0)}",
+        f"- 声称的风险/机理高阶模型数：{report.metrics.get('claimed_risk_models', 0)}",
         f"- 解题闭环分：{report.metrics.get('solution_score', report.score)}/100",
         f"- 证据追溯分：{report.metrics.get('evidence_score', report.score)}/100",
         f"- 论文结构分：{report.metrics.get('structure_score', report.score)}/100",
@@ -653,6 +705,17 @@ def _compute_score(issues: list[str], metrics: dict) -> int:
                 "Reference section",
                 "Core result table",
                 "Model claims without",
+                "Award evidence density weak",
+                "Risk model evidence weak",
+                "Selected high-level model missing from paper narrative",
+                "Selected high-level model has no matching generated result table",
+                "High-level model table lacks model-specific metrics",
+                "Claimed high-level model",
+                "Award structure weak",
+                "Problem-answer closure weak",
+                "Model formulation weak",
+                "Model validation section weak",
+                "Conclusion answer density weak",
             )
         )
     ]

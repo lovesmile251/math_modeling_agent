@@ -315,6 +315,33 @@ def test_selection_profiles_nonstandard_semantic_columns(temp_workspace):
     assert "resource_allocation" in selected
 
 
+def test_selection_promotes_tail_risk_optimization_narrative(temp_workspace):
+    path = temp_workspace.data_dir / "tail_risk_optimization.csv"
+    pd.DataFrame(
+        {
+            "project": ["A", "B", "C", "A", "B", "C", "A", "B", "C"],
+            "scenario": ["normal", "normal", "normal", "stress", "stress", "stress", "tail", "tail", "tail"],
+            "resource": [20.0, 25.0, 18.0, 20.0, 25.0, 18.0, 20.0, 25.0, 18.0],
+            "profit": [70.0, 64.0, 45.0, 55.0, 42.0, 40.0, 36.0, 20.0, 32.0],
+            "loss": [3.0, 5.0, 2.0, 10.0, 18.0, 9.0, 25.0, 45.0, 20.0],
+            "budget": [45.0] * 9,
+            "alpha": [0.9] * 9,
+        }
+    ).to_csv(path, index=False)
+
+    problem = "optimize project resources under uncertainty, scenario stress, CVaR tail risk, and downside loss"
+    state = _run_selection(problem, temp_workspace, [path])
+    selected = set(json.loads(state.notes["selected_model_ids"]))
+    payload = json.loads(state.artifacts["model_selection_report"].read_text(encoding="utf-8"))
+
+    assert "cvar_optimization" in selected
+    assert selected.intersection({"robust_optimization", "scenario_optimization", "chance_constrained_optimization"})
+    narrative_ids = {item["model_id"] for item in payload["paper_model_narrative"]}
+    assert "cvar_optimization" in narrative_ids
+    cvar_plan = next(item for item in payload["model_comparison_plan"] if item["model_id"] == "cvar_optimization")
+    assert {"var_loss", "cvar_loss", "risk_adjusted_score"}.issubset(set(cvar_plan["metrics"]))
+
+
 def test_selection_picks_forecast_for_trend_problem(temp_workspace, sample_csv):
     state = _run_selection("对时间序列进行趋势预测，预测未来数值。", temp_workspace, [sample_csv])
     selected = json.loads(state.notes["selected_model_ids"])

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from tools.report_builder import (
     Block,
@@ -24,6 +28,106 @@ _DOCX_CODE_FONT = "Consolas"
 _MAX_TABLE_COLUMNS = 8
 _LONG_TABLE_ROWS = 24
 _LONG_CODE_LINE = 96
+DEFAULT_DOCX_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent / "paper_templates" / "assets" / "national_contest_2025.docx"
+)
+DEFAULT_DOCX_TEMPLATE_SHA256 = "aedc429e0951fbc5d4ce92c0c18a6c28218782baaffe23307a97540388135bc5"
+
+
+@dataclass(frozen=True)
+class DocxTemplateField:
+    role: str
+    source: str
+    docx_style: str
+    template_anchor: str
+    formatting: str
+
+
+@dataclass(frozen=True)
+class DocxTemplateLayoutCheck:
+    passed: bool
+    document_path: str
+    template_path: str
+    template_sha256: str
+    field_mapping: list[dict[str, str]]
+    metrics: dict[str, Any]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+_DOCX_TEMPLATE_FIELD_MAPPING: tuple[DocxTemplateField, ...] = (
+    DocxTemplateField(
+        role="title",
+        source="Document.title",
+        docx_style="Normal",
+        template_anchor="基于XXX模型的XXX问题研究",
+        formatting="centered, 16pt, template section geometry",
+    ),
+    DocxTemplateField(
+        role="abstract_heading",
+        source="Heading text matching 摘要/Abstract",
+        docx_style="Normal",
+        template_anchor="摘要",
+        formatting="centered, 14pt",
+    ),
+    DocxTemplateField(
+        role="keywords",
+        source="Heading/paragraph text matching 关键词/Keywords",
+        docx_style="Normal",
+        template_anchor="关键词：XXX，XXX，XXX，XXX",
+        formatting="left aligned, 12pt",
+    ),
+    DocxTemplateField(
+        role="section_heading",
+        source="Heading(level=1)",
+        docx_style="Heading 1",
+        template_anchor="问题重述 / 问题分析 / 模型假设",
+        formatting="template heading style",
+    ),
+    DocxTemplateField(
+        role="subsection_heading",
+        source="Heading(level=2)",
+        docx_style="Heading 2",
+        template_anchor="问题一的分析",
+        formatting="template heading style",
+    ),
+    DocxTemplateField(
+        role="body",
+        source="Paragraph/ListBlock/CodeBlock text",
+        docx_style="Normal/List Paragraph",
+        template_anchor="正文示例段落",
+        formatting="template fonts with explicit CJK fallback where needed",
+    ),
+    DocxTemplateField(
+        role="display_math",
+        source="MathBlock and inline math runs",
+        docx_style="Normal",
+        template_anchor="这里插入公式",
+        formatting="rendered equation image, centered for display math",
+    ),
+    DocxTemplateField(
+        role="table",
+        source="TableBlock",
+        docx_style="Table Grid",
+        template_anchor="表1 本文的符号说明",
+        formatting="split when wider than 8 columns; explicit cell fonts",
+    ),
+    DocxTemplateField(
+        role="figure",
+        source="ImageBlock",
+        docx_style="Normal",
+        template_anchor="图1 问题的总分析",
+        formatting="max width 5.8in with centered caption paragraph",
+    ),
+)
+
+
+def docx_template_field_mapping() -> list[dict[str, str]]:
+    """Return the formal national-contest DOCX template field mapping."""
+
+    return [asdict(item) for item in _DOCX_TEMPLATE_FIELD_MAPPING]
 
 
 def _equation_dir(output_path: Path) -> Path:
@@ -35,29 +139,35 @@ def _equation_dir(output_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def export_docx(doc: Document, output_path: Path) -> Path:
+def export_docx(
+    doc: Document,
+    output_path: Path,
+    template_path: Path | None = DEFAULT_DOCX_TEMPLATE_PATH,
+) -> Path:
     from docx import Document as DocxDocument
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.shared import Inches, Pt
 
-    docx = DocxDocument()
+    docx, using_template = _new_docx_document(DocxDocument, template_path)
 
-    normal = docx.styles["Normal"]
-    normal.font.name = _DOCX_CJK_FONT
-    normal.font.size = Pt(11)
-    rpr = normal.element.get_or_add_rPr()
-    rfonts = rpr.get_or_add_rFonts()
-    rfonts.set(qn("w:eastAsia"), _DOCX_CJK_FONT)
+    if not using_template:
+        normal = docx.styles["Normal"]
+        normal.font.name = _DOCX_CJK_FONT
+        normal.font.size = Pt(11)
+        rpr = normal.element.get_or_add_rPr()
+        rfonts = rpr.get_or_add_rFonts()
+        rfonts.set(qn("w:eastAsia"), _DOCX_CJK_FONT)
 
     eq_dir = _equation_dir(output_path)
 
-    docx.add_heading(doc.title, level=0)
+    _docx_add_title(docx, doc.title, Pt, WD_ALIGN_PARAGRAPH, using_template)
 
     for block in _content_blocks(doc):
         if isinstance(block, Heading):
-            heading = docx.add_heading("", level=min(max(block.level, 1), 4))
+            heading = _docx_add_heading(docx, block, Pt, WD_ALIGN_PARAGRAPH, using_template)
             _docx_add_runs(heading, block.text, eq_dir)
+            _docx_apply_heading_run_overrides(heading, block.text, Pt, using_template)
         elif isinstance(block, Paragraph):
             _docx_add_runs(docx.add_paragraph(), block.text, eq_dir)
         elif isinstance(block, MathBlock):
@@ -78,9 +188,9 @@ def export_docx(doc: Document, output_path: Path) -> Path:
                 para.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 para.add_run(_math_fallback_text(block.latex))
         elif isinstance(block, ListBlock):
-            style = "List Number" if block.ordered else "List Bullet"
-            for item in block.items:
-                _docx_add_runs(docx.add_paragraph(style=style), item, eq_dir)
+            for index, item in enumerate(block.items, start=1):
+                paragraph = _docx_add_list_paragraph(docx, block.ordered, index)
+                _docx_add_runs(paragraph, item, eq_dir)
         elif isinstance(block, CodeBlock):
             para = docx.add_paragraph()
             run = para.add_run(block.text)
@@ -114,6 +224,256 @@ def export_docx(doc: Document, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     docx.save(str(output_path))
     return output_path
+
+
+def _new_docx_document(docx_document_factory, template_path: Path | None):
+    if template_path is not None:
+        path = Path(template_path)
+        if path.exists():
+            docx = docx_document_factory(str(path))
+            _docx_clear_body(docx)
+            return docx, True
+    return docx_document_factory(), False
+
+
+def _docx_clear_body(docx) -> None:
+    from docx.oxml.ns import qn
+
+    body = docx._element.body
+    for child in list(body):
+        if child.tag != qn("w:sectPr"):
+            body.remove(child)
+
+
+def check_docx_template_layout(
+    docx_path: Path,
+    template_path: Path | None = DEFAULT_DOCX_TEMPLATE_PATH,
+) -> DocxTemplateLayoutCheck:
+    """Audit that a generated DOCX still follows the formal contest template."""
+
+    warnings: list[str] = []
+    metrics: dict[str, Any] = {}
+    docx_path = Path(docx_path)
+    template = Path(template_path) if template_path is not None else None
+
+    if not docx_path.exists():
+        return DocxTemplateLayoutCheck(
+            passed=False,
+            document_path=str(docx_path),
+            template_path=str(template or ""),
+            template_sha256="",
+            field_mapping=docx_template_field_mapping(),
+            metrics={},
+            warnings=[f"DOCX file does not exist: {docx_path}"],
+        )
+    if template is None or not template.exists():
+        return DocxTemplateLayoutCheck(
+            passed=False,
+            document_path=str(docx_path),
+            template_path=str(template or ""),
+            template_sha256="",
+            field_mapping=docx_template_field_mapping(),
+            metrics={},
+            warnings=[f"DOCX template asset does not exist: {template}"],
+        )
+
+    from docx import Document as DocxDocument
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    template_hash = _file_sha256(template)
+    metrics["template_hash_matches"] = int(template_hash == DEFAULT_DOCX_TEMPLATE_SHA256)
+    if template_hash != DEFAULT_DOCX_TEMPLATE_SHA256:
+        warnings.append("DOCX template hash does not match the registered 2025 national-contest asset")
+
+    try:
+        generated = DocxDocument(str(docx_path))
+        template_doc = DocxDocument(str(template))
+    except Exception as exc:
+        return DocxTemplateLayoutCheck(
+            passed=False,
+            document_path=str(docx_path),
+            template_path=str(template),
+            template_sha256=template_hash,
+            field_mapping=docx_template_field_mapping(),
+            metrics=metrics,
+            warnings=[f"DOCX layout audit failed to open document: {exc}"],
+        )
+
+    metrics["paragraphs"] = len(generated.paragraphs)
+    metrics["tables"] = len(generated.tables)
+    metrics["sections"] = len(generated.sections)
+    metrics["field_mapping_count"] = len(_DOCX_TEMPLATE_FIELD_MAPPING)
+
+    _audit_docx_section_geometry(generated, template_doc, metrics, warnings)
+    _audit_docx_placeholders(generated, metrics, warnings)
+    _audit_docx_title(generated, WD_ALIGN_PARAGRAPH, warnings)
+    _audit_docx_tables(generated, metrics, warnings)
+
+    return DocxTemplateLayoutCheck(
+        passed=not warnings,
+        document_path=str(docx_path),
+        template_path=str(template),
+        template_sha256=template_hash,
+        field_mapping=docx_template_field_mapping(),
+        metrics=metrics,
+        warnings=warnings,
+    )
+
+
+def write_docx_template_layout_report(
+    report: DocxTemplateLayoutCheck,
+    output_path: Path,
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return output_path
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _audit_docx_section_geometry(generated, template_doc, metrics: dict[str, Any], warnings: list[str]) -> None:
+    if not generated.sections:
+        warnings.append("DOCX has no sections")
+        return
+    if not template_doc.sections:
+        warnings.append("DOCX template has no sections")
+        return
+    generated_section = generated.sections[0]
+    template_section = template_doc.sections[0]
+    attrs = (
+        "page_width",
+        "page_height",
+        "left_margin",
+        "right_margin",
+        "top_margin",
+        "bottom_margin",
+    )
+    mismatches: list[str] = []
+    for attr in attrs:
+        actual = int(getattr(generated_section, attr))
+        expected = int(getattr(template_section, attr))
+        metrics[f"section_{attr}"] = actual
+        metrics[f"template_{attr}"] = expected
+        if actual != expected:
+            mismatches.append(attr)
+    if mismatches:
+        warnings.append("DOCX section geometry differs from template: " + ", ".join(mismatches))
+
+
+def _audit_docx_placeholders(generated, metrics: dict[str, Any], warnings: list[str]) -> None:
+    text = _docx_visible_text(generated)
+    placeholders = (
+        "基于XXX模型的XXX问题研究",
+        "关键词：XXX，XXX，XXX，XXX",
+        "这里插入公式，务必用公式编辑器，不要截图！",
+        "这里插入公式",
+    )
+    remaining = [item for item in placeholders if item in text]
+    metrics["template_placeholder_hits"] = len(remaining)
+    if remaining:
+        warnings.append("DOCX still contains template placeholder text: " + ", ".join(remaining[:4]))
+
+
+def _audit_docx_title(generated, WD_ALIGN_PARAGRAPH, warnings: list[str]) -> None:
+    title = next((paragraph for paragraph in generated.paragraphs if paragraph.text.strip()), None)
+    if title is None:
+        warnings.append("DOCX has no visible title paragraph")
+        return
+    if title.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+        warnings.append("DOCX title paragraph is not centered like the contest template")
+    sizes = [run.font.size.pt for run in title.runs if run.font.size is not None]
+    if sizes and not any(abs(size - 16.0) < 0.1 for size in sizes):
+        warnings.append("DOCX title paragraph does not preserve the template 16pt title size")
+
+
+def _audit_docx_tables(generated, metrics: dict[str, Any], warnings: list[str]) -> None:
+    max_columns = 0
+    for table in generated.tables:
+        max_columns = max(max_columns, len(table.columns))
+        if len(table.columns) > _MAX_TABLE_COLUMNS:
+            warnings.append(f"DOCX table has {len(table.columns)} columns after export; expected split layout")
+    metrics["max_table_columns"] = max_columns
+
+
+def _docx_visible_text(docx) -> str:
+    parts = [paragraph.text for paragraph in docx.paragraphs]
+    for table in docx.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                parts.append(cell.text)
+    return "\n".join(parts)
+
+
+def _docx_add_title(docx, title: str, Pt, WD_ALIGN_PARAGRAPH, using_template: bool):
+    if not using_template:
+        return docx.add_heading(title, level=0)
+
+    paragraph = docx.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.first_line_indent = Pt(0)
+    paragraph.paragraph_format.space_before = Pt(7.85)
+    paragraph.paragraph_format.space_after = Pt(7.85)
+    run = paragraph.add_run(title)
+    run.font.size = Pt(16)
+    return paragraph
+
+
+def _docx_add_heading(docx, block: Heading, Pt, WD_ALIGN_PARAGRAPH, using_template: bool):
+    text = block.text.strip()
+    if using_template and text == "摘要":
+        paragraph = docx.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.paragraph_format.first_line_indent = Pt(0)
+        paragraph.paragraph_format.space_before = Pt(7.85)
+        paragraph.paragraph_format.space_after = Pt(7.85)
+        return paragraph
+    if using_template and text == "关键词":
+        paragraph = docx.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        paragraph.paragraph_format.first_line_indent = Pt(0)
+        paragraph.paragraph_format.space_before = Pt(7.85)
+        paragraph.paragraph_format.space_after = Pt(7.85)
+        return paragraph
+    return docx.add_heading("", level=min(max(block.level, 1), 4))
+
+
+def _docx_apply_heading_run_overrides(paragraph, text: str, Pt, using_template: bool) -> None:
+    if not using_template:
+        return
+    size = None
+    stripped = text.strip()
+    if stripped == "摘要":
+        size = Pt(14)
+    elif stripped == "关键词":
+        size = Pt(12)
+    if size is not None:
+        for run in paragraph.runs:
+            run.font.size = size
+
+
+def _docx_add_list_paragraph(docx, ordered: bool, index: int):
+    preferred = "List Number" if ordered else "List Bullet"
+    style = _docx_first_existing_style(docx, [preferred, "List Paragraph"])
+    paragraph = docx.add_paragraph(style=style) if style else docx.add_paragraph()
+    if style != preferred:
+        paragraph.add_run(f"{index}. " if ordered else "- ")
+    return paragraph
+
+
+def _docx_first_existing_style(docx, names: list[str]) -> str | None:
+    for name in names:
+        try:
+            docx.styles[name]
+        except KeyError:
+            continue
+        return name
+    return None
 
 
 def _docx_set_run_fonts(run, ascii_font: str, east_asia_font: str) -> None:
@@ -623,6 +983,10 @@ def check_export_layout(doc: Document) -> list[str]:
     """Return non-blocking layout warnings before rendering export files."""
 
     warnings: list[str] = []
+    if not DEFAULT_DOCX_TEMPLATE_PATH.exists():
+        warnings.append(f"DOCX template asset is missing: {DEFAULT_DOCX_TEMPLATE_PATH}")
+    elif _file_sha256(DEFAULT_DOCX_TEMPLATE_PATH) != DEFAULT_DOCX_TEMPLATE_SHA256:
+        warnings.append("DOCX template asset hash differs from the registered 2025 national-contest template")
     for index, block in enumerate(_content_blocks(doc), start=1):
         if isinstance(block, CodeBlock):
             long_lines = [line_no for line_no, line in enumerate(block.text.splitlines(), start=1) if len(line) > _LONG_CODE_LINE]
@@ -642,10 +1006,18 @@ def check_export_layout(doc: Document) -> list[str]:
     return warnings
 
 
-def export_document(doc: Document, fmt: str, output_dir: Path, stem: str = "paper") -> Path:
+def export_document(
+    doc: Document,
+    fmt: str,
+    output_dir: Path,
+    stem: str = "paper",
+    docx_template_path: Path | None = DEFAULT_DOCX_TEMPLATE_PATH,
+) -> Path:
     key = fmt.lower()
     if key not in _EXPORTERS:
         raise ValueError(f"Unsupported export format: {fmt}. Choose from {sorted(set(SUPPORTED_FORMATS))}.")
     func, suffix = _EXPORTERS[key]
     output_path = output_dir / f"{stem}{suffix}"
+    if key == "docx":
+        return export_docx(doc, output_path, template_path=docx_template_path)
     return func(doc, output_path)

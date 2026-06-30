@@ -17,6 +17,7 @@ def build_formulation(
 
     normalized_models = normalize_model_ids(selected_model_ids)
     selected_model_ids = normalized_models.selected
+    subproblems = normalize_subproblems(problem_spec.subproblems)
 
     variables = [
         {
@@ -33,12 +34,23 @@ def build_formulation(
             ]
         )
     ]
+    if any(task.get("task_type") == "optimization" for task in subproblems) and not any(
+        item.get("role") == "decision" for item in variables
+    ):
+        variables.append(
+            {
+                "name": "decision_plan",
+                "role": "decision",
+                "domain": "mixed",
+                "unit": "unspecified",
+            }
+        )
     parameters = [
         {"name": name, "source": "data_or_estimation", "unit": "unspecified"}
         for name in problem_spec.parameters
     ]
     stages: list[dict[str, Any]] = []
-    for index, task in enumerate(problem_spec.subproblems, start=1):
+    for index, task in enumerate(subproblems, start=1):
         task_type = str(task.get("task_type", "exploration"))
         compatible_models = [
             model_id
@@ -62,7 +74,7 @@ def build_formulation(
             }
         )
 
-    objectives = _build_objectives(problem_spec)
+    objectives = _build_objectives(subproblems)
     constraints = [
         {
             "constraint_id": f"G{index}",
@@ -89,6 +101,29 @@ def build_formulation(
     return spec
 
 
+def normalize_subproblems(subproblems: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate noisy task decomposition while preserving stable task ids.
+
+    Real OCR/heuristic decomposition can emit duplicate ids with conflicting
+    task types. Keep the task that is most useful for executable modeling.
+    """
+    best: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for index, raw_task in enumerate(subproblems or [], start=1):
+        if not isinstance(raw_task, dict):
+            continue
+        task = dict(raw_task)
+        task_id = str(task.get("id") or f"Q{index}")
+        task["id"] = task_id
+        if task_id not in best:
+            best[task_id] = task
+            order.append(task_id)
+            continue
+        if _task_priority(task) > _task_priority(best[task_id]):
+            best[task_id] = task
+    return [best[task_id] for task_id in order]
+
+
 def validate_formulation(spec: FormulationSpec) -> list[str]:
     issues: list[str] = []
     stage_ids = [str(stage.get("stage_id", "")) for stage in spec.stages]
@@ -111,9 +146,9 @@ def validate_formulation(spec: FormulationSpec) -> list[str]:
     return issues
 
 
-def _build_objectives(problem_spec: ProblemSpec) -> list[dict[str, str]]:
+def _build_objectives(subproblems: list[dict[str, Any]]) -> list[dict[str, str]]:
     objectives: list[dict[str, str]] = []
-    for task in problem_spec.subproblems:
+    for task in subproblems:
         if task.get("task_type") != "optimization":
             continue
         text = f"{task.get('objective', '')} {task.get('source_text', '')}".lower()
@@ -129,6 +164,26 @@ def _build_objectives(problem_spec: ProblemSpec) -> list[dict[str, str]]:
             }
         )
     return objectives
+
+
+def _task_priority(task: dict[str, Any]) -> int:
+    task_type = str(task.get("task_type") or "exploration")
+    priority = {
+        "optimization": 80,
+        "forecast": 70,
+        "evaluation": 65,
+        "statistics": 60,
+        "simulation": 58,
+        "network": 55,
+        "clustering": 53,
+        "classification": 50,
+        "exploration": 10,
+    }.get(task_type, 20)
+    if task.get("possible_model_types"):
+        priority += 5
+    if task.get("variables"):
+        priority += 2
+    return priority
 
 
 def _variable_role(name: str, problem_spec: ProblemSpec) -> str:

@@ -58,16 +58,24 @@ def _build_model_mapping():
 
     from models.optimization.advanced import (
         astar_path_plan,
+        chance_constrained_resource_optimization,
+        cvar_resource_optimization,
         dynamic_programming_plan,
         integer_branch_bound,
         multiobjective_weighted_sum,
         nonlinear_gradient_optimization,
+        robust_resource_optimization,
+        scenario_resource_optimization,
         tsp_route_heuristic,
         vrp_savings_heuristic,
     )
     mapping["nonlinear_optimization"] = (nonlinear_gradient_optimization, False, False, False)
     mapping["integer_programming"] = (integer_branch_bound, False, False, False)
     mapping["multiobjective_optimization"] = (multiobjective_weighted_sum, False, False, False)
+    mapping["robust_optimization"] = (robust_resource_optimization, False, False, False)
+    mapping["scenario_optimization"] = (scenario_resource_optimization, False, False, False)
+    mapping["chance_constrained_optimization"] = (chance_constrained_resource_optimization, False, False, False)
+    mapping["cvar_optimization"] = (cvar_resource_optimization, False, False, False)
     mapping["dynamic_programming_plan"] = (dynamic_programming_plan, False, False, False)
     mapping["astar_path"] = (astar_path_plan, False, False, False)
     mapping["tsp_route"] = (tsp_route_heuristic, False, False, False)
@@ -215,11 +223,13 @@ def _build_model_mapping():
         logistic_growth_model,
         lotka_volterra_model,
         michaelis_menten_kinetics,
+        seir_epidemic_model,
         sir_epidemic_model,
         solow_growth_model,
     )
     mapping["logistic_growth"] = (logistic_growth_model, False, False, False)
     mapping["sir_model"] = (sir_epidemic_model, False, False, False)
+    mapping["seir_model"] = (seir_epidemic_model, False, False, False)
     mapping["lotka_volterra"] = (lotka_volterra_model, False, False, False)
     mapping["solow_growth"] = (solow_growth_model, False, False, False)
     mapping["heat_conduction"] = (heat_conduction_1d, False, False, False)
@@ -300,13 +310,19 @@ def _make_test_df(model_id: str) -> pd.DataFrame:
     if model_id in ("resource_allocation", "knapsack_01", "assignment_plan",
                     "bin_packing", "scheduling_plan",
                     "nonlinear_optimization", "integer_programming",
-                    "multiobjective_optimization", "dynamic_programming_plan"):
+                    "multiobjective_optimization", "robust_optimization",
+                    "scenario_optimization", "chance_constrained_optimization",
+                    "cvar_optimization", "dynamic_programming_plan"):
         return pd.DataFrame({
+            "scenario": ["base", "base", "base", "base", "base", "stress", "stress", "stress", "stress", "stress"],
             "cost": rng.integers(10, 100, 10).astype(float),
             "benefit": rng.integers(20, 200, 10).astype(float),
             "resource": rng.integers(5, 50, 10).astype(float),
             "budget": rng.integers(100, 500, 10).astype(float),
             "profit": rng.integers(30, 150, 10).astype(float),
+            "uncertainty": rng.uniform(0.02, 0.25, 10),
+            "service_level": [0.9] * 10,
+            "alpha": [0.9] * 10,
         })
 
     if model_id == "cement_esp_optimization":

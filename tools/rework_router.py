@@ -24,11 +24,15 @@ from agents.base import (
     A_REVIEW_FINDINGS,
     A_SECTION_DRAFT,
     A_TASK_TRACEABILITY_REPORT,
+    K_AUTO_REWORK_REPAIR_BRIEF,
+    K_AUTO_REWORK_REPAIR_HINTS,
     K_AUTO_REWORK_RERUN_FROM_PHASE,
     K_EXPORT_PDF_LAYOUT_GATE,
     K_EXPORT_QUALITY_GATE,
     K_EXECUTION_STATUS,
     K_INNOVATION_EVIDENCE_GATE,
+    K_PAPER_EVIDENCE_GATE,
+    K_PAPER_EVIDENCE_ISSUES,
     K_PAPER_QUALITY_SCORE,
     K_PREWRITING_GATE_STATUS,
     K_STRONG_BASELINE_GATE,
@@ -64,6 +68,7 @@ class ReworkPlan:
     actions: tuple[str, ...]
     refresh_artifacts: tuple[str, ...]
     can_auto_apply: bool = False
+    repair_hints: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +78,7 @@ class ReworkPlan:
             "actions": list(self.actions),
             "refresh_artifacts": list(self.refresh_artifacts),
             "can_auto_apply": self.can_auto_apply,
+            "repair_hints": list(self.repair_hints),
         }
 
 
@@ -149,6 +155,16 @@ def recommend_rework_route(state: WorkflowState) -> ReworkRoute | None:
             severity="high",
         )
 
+    if state.notes.get(K_PAPER_EVIDENCE_GATE) == "failed":
+        route = _route_for_paper_evidence_issues(state.notes.get(K_PAPER_EVIDENCE_ISSUES, ""), state)
+        if route is not None:
+            return route
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "paper evidence audit failed; revise paper sections with table-backed quantitative evidence",
+            severity="high",
+        )
+
     if state.notes.get(K_TASK_TRACEABILITY_GATE) == "failed":
         issues = state.notes.get(K_TASK_TRACEABILITY_BLOCKING_ISSUES, "")
         lowered = issues.lower()
@@ -178,6 +194,9 @@ def recommend_rework_route(state: WorkflowState) -> ReworkRoute | None:
         )
 
     if state.notes.get(K_EXPORT_QUALITY_GATE) == "failed":
+        specific_route = _route_for_export_quality_blockers(state)
+        if specific_route is not None:
+            return specific_route
         return ReworkRoute(
             WorkflowPhase.SECTION_WRITING,
             "formal export quality gate failed; revise paper sections and remove blocking issues",
@@ -217,6 +236,7 @@ def build_rework_plan(state: WorkflowState) -> ReworkPlan | None:
         actions=_actions_for_phase(route.target_phase),
         refresh_artifacts=_artifacts_for_phases(invalidated),
         can_auto_apply=route.blocking and route.severity in {"high", "medium"},
+        repair_hints=_repair_hints_for_state(state, route),
     )
 
 
@@ -250,6 +270,7 @@ def build_auto_rework_report(
         "initial_route": plan.route.to_dict(),
         "applied": apply_result.to_dict(),
         "actions": list(plan.actions),
+        "repair_hints": list(plan.repair_hints),
         "refresh_artifacts": list(plan.refresh_artifacts),
         "before_gates": _gate_snapshot(before_notes),
         "after_gates": _gate_snapshot(after_notes),
@@ -276,6 +297,9 @@ def format_auto_rework_report(report: dict[str, Any]) -> str:
     ]
     actions = report.get("actions") if isinstance(report.get("actions"), list) else []
     lines.extend(f"- {item}" for item in actions)
+    repair_hints = report.get("repair_hints") if isinstance(report.get("repair_hints"), list) else []
+    lines.extend(["", "## Repair Hints"])
+    lines.extend(f"- {item}" for item in repair_hints) if repair_hints else lines.append("- None")
     refresh = report.get("refresh_artifacts") if isinstance(report.get("refresh_artifacts"), list) else []
     lines.extend(["", "## 刷新产物"])
     lines.extend(f"- `{item}`" for item in refresh) if refresh else lines.append("- 无")
@@ -356,6 +380,12 @@ def apply_rework_plan(
         phase.value for phase in resolved.invalidated_phases
     )
     state.notes["auto_rework_stale_artifacts"] = ",".join(stale)
+    if resolved.repair_hints:
+        state.notes[K_AUTO_REWORK_REPAIR_HINTS] = json.dumps(
+            list(resolved.repair_hints),
+            ensure_ascii=False,
+        )
+        state.notes[K_AUTO_REWORK_REPAIR_BRIEF] = "; ".join(resolved.repair_hints[:3])
     state.record_decision(
         resolved.rerun_from_phase,
         "apply_rework_plan",
@@ -402,6 +432,194 @@ def _paper_score(state: WorkflowState) -> int | None:
         return int(float(raw))
     except (TypeError, ValueError):
         return None
+
+
+def _route_for_export_quality_blockers(state: WorkflowState) -> ReworkRoute | None:
+    blockers = " ".join(
+        str(state.notes.get(key, ""))
+        for key in (
+            "export_blocking_issues",
+            "paper_quality_report",
+            "export_errors",
+        )
+    )
+    lowered = blockers.lower()
+    if not lowered.strip():
+        return None
+
+    if (
+        "claimed high-level model has no matching generated result table" in lowered
+        or "selected high-level model has no matching generated result table" in lowered
+        or "high-level model table lacks model-specific metrics" in lowered
+        or "model claims without generated result tables" in lowered
+    ):
+        return ReworkRoute(
+            WorkflowPhase.CODE_PLAN,
+            "high-level model evidence table is missing or lacks required metrics; rerun code planning and execution to produce table-backed model diagnostics",
+            severity="high",
+        )
+
+    if "core result table missing" in lowered:
+        has_tables = bool(list(state.workspace.tables_dir.glob("*.csv")))
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING if has_tables else WorkflowPhase.RESULT_ANALYSIS,
+            (
+                "paper result section lacks a core table; cite generated tables in the paper"
+                if has_tables
+                else "paper result section lacks a core table and no generated tables are available; rebuild result analysis"
+            ),
+            severity="high",
+        )
+
+    if "risk model evidence weak" in lowered or "selected high-level model missing from paper narrative" in lowered:
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "high-level risk/mechanism model is claimed without model-specific metrics; rewrite model and result sections with table-backed metrics",
+            severity="high",
+        )
+
+    if "award evidence density weak" in lowered:
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "abstract lacks enough quantitative evidence; rewrite abstract and conclusion using generated result values",
+            severity="medium",
+            blocking=True,
+        )
+
+    if (
+        "award structure weak" in lowered
+        or "problem-answer closure weak" in lowered
+        or "model formulation weak" in lowered
+        or "model validation section weak" in lowered
+        or "conclusion answer density weak" in lowered
+    ):
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "national-award paper structure is incomplete; rewrite high-value sections and close every subproblem answer thread",
+            severity="high",
+        )
+
+    return None
+
+
+def _route_for_paper_evidence_issues(issues: str, state: WorkflowState) -> ReworkRoute | None:
+    lowered = str(issues).lower()
+    if not lowered.strip():
+        return None
+    if (
+        "claimed high-level model has no matching generated result table" in lowered
+        or "selected high-level model has no matching generated result table" in lowered
+        or "high-level model table lacks model-specific metrics" in lowered
+    ):
+        return ReworkRoute(
+            WorkflowPhase.CODE_PLAN,
+            "paper evidence audit found high-level model table evidence missing or incomplete",
+            severity="high",
+        )
+    if "core result table missing" in lowered:
+        has_tables = bool(list(state.workspace.tables_dir.glob("*.csv")))
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING if has_tables else WorkflowPhase.RESULT_ANALYSIS,
+            (
+                "paper evidence audit found uncited generated tables"
+                if has_tables
+                else "paper evidence audit found no result table evidence to cite"
+            ),
+            severity="high",
+        )
+    if (
+        "risk model evidence weak" in lowered
+        or "award evidence density weak" in lowered
+        or "selected high-level model missing from paper narrative" in lowered
+    ):
+        return ReworkRoute(
+            WorkflowPhase.SECTION_WRITING,
+            "paper evidence audit requires stronger model-specific metrics in paper sections",
+            severity="high",
+        )
+    return None
+
+
+def _repair_hints_for_state(state: WorkflowState, route: ReworkRoute) -> tuple[str, ...]:
+    hints: list[str] = []
+    notes_blob = " ".join(str(value) for value in state.notes.values()).lower()
+
+    if route.target_phase == WorkflowPhase.CODE_PLAN:
+        hints.extend(
+            [
+                "Produce non-empty CSV result tables for every selected executable model.",
+                "Update generated code so model-specific diagnostics are written as table columns, not only prose.",
+            ]
+        )
+        if "cvar" in notes_blob:
+            hints.append("For cvar_optimization, output var_loss, cvar_loss, tail_scenario_count, and risk_adjusted_score.")
+        if "robust" in notes_blob:
+            hints.append("For robust_optimization, output robust_value, robust_resource, capacity_slack, and uncertainty_rate.")
+        if "chance" in notes_blob or "service_level" in notes_blob:
+            hints.append("For chance_constrained_optimization, output safe_resource, service_level, feasibility_probability, and violation_probability.")
+        if "execution" in route.reason.lower() or state.notes.get(K_EXECUTION_STATUS) == "failed":
+            error = str(state.notes.get("execution_error", "")).strip()
+            if error:
+                hints.append("Resolve the recorded execution error before regenerating downstream evidence: " + error[:240])
+
+    elif route.target_phase == WorkflowPhase.EXPERIMENT_PLAN:
+        hints.extend(
+            [
+                "Add an executed baseline comparison and require strong_baseline_audit.passed in experiment_report.json.",
+                "Add validation, ablation, and sensitivity evidence for any claimed innovation or high-level model.",
+            ]
+        )
+        if state.notes.get(K_INNOVATION_EVIDENCE_GATE) == "failed":
+            hints.append("Either execute the claimed innovation model or remove unsupported innovation claims from the paper.")
+
+    elif route.target_phase == WorkflowPhase.RESULT_ANALYSIS:
+        hints.extend(
+            [
+                "Recompute result summaries from generated tables and expose final task answers as numeric rows.",
+                "Ensure result_analysis names the source table for each core conclusion.",
+            ]
+        )
+
+    elif route.target_phase == WorkflowPhase.EVIDENCE_MAPPING:
+        hints.extend(
+            [
+                "Rebuild result_registry, claim_evidence_map, and task_traceability_report from the latest tables.",
+                "For each deliverable, bind an executable model, a result table, and a paper section.",
+            ]
+        )
+        task_issues = str(state.notes.get(K_TASK_TRACEABILITY_BLOCKING_ISSUES, "")).strip()
+        if task_issues:
+            hints.append("Resolve task traceability blockers: " + task_issues[:240])
+
+    elif route.target_phase == WorkflowPhase.SECTION_WRITING:
+        hints.extend(
+            [
+                "Rewrite affected paper sections around generated table values and avoid unsupported model claims.",
+                "Add at least one Markdown core result table in the Results section and interpret it in prose.",
+                "Put at least five substantive numeric result values in the abstract when available.",
+            ]
+        )
+        if "selected high-level model missing from paper narrative" in notes_blob:
+            hints.append("Add a model/results paragraph for each selected high-level model and cite its table-backed metrics.")
+        if "risk model evidence weak" in notes_blob:
+            hints.append("For each risk model claim, mention at least two model-specific metrics from its generated table.")
+        if "award structure weak" in notes_blob or "problem-answer closure weak" in notes_blob:
+            hints.append("Restore the national-contest section skeleton and close each Q1/Q2/Q3 thread with method, table-backed result, and conclusion.")
+        if "model validation section weak" in notes_blob:
+            hints.append("Add a validation subsection with error analysis, baseline comparison, ablation, or robustness evidence.")
+        if "conclusion answer density weak" in notes_blob:
+            hints.append("Rewrite the conclusion as numbered final answers with quantitative values for each subproblem.")
+
+    elif route.target_phase == WorkflowPhase.EXPORT:
+        hints.extend(
+            [
+                "Run export after paper regeneration so export_quality_gate, paper_evidence_gate, and PDF layout gate are evaluated.",
+                "Ensure paper_evidence_audit.json and paper_evidence_audit.md are written before accepting final delivery.",
+            ]
+        )
+
+    hints.append("After rerun, compare the same gate status and blocker text to avoid repeated same-cause loops.")
+    return tuple(_dedupe(hints))
 
 
 def _invalidated_phases(target_phase: WorkflowPhase) -> tuple[WorkflowPhase, ...]:
@@ -482,3 +700,13 @@ def _artifacts_for_phases(phases: tuple[WorkflowPhase, ...]) -> tuple[str, ...]:
     for phase in phases:
         artifacts.extend(phase_artifacts.get(phase, ()))
     return tuple(dict.fromkeys(artifacts))
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out

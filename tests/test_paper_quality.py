@@ -1,6 +1,17 @@
 from __future__ import annotations
 
-from tools.paper_quality import clean_paper_text, check_keywords, check_traceability, evaluate_paper_quality
+import json
+
+import pandas as pd
+
+from tools.paper_evidence_audit import audit_paper_evidence_density
+from tools.paper_quality import (
+    check_keywords,
+    check_traceability,
+    clean_paper_text,
+    evaluate_paper_quality,
+    submission_blocking_issues,
+)
 
 
 def test_clean_paper_text_removes_llm_chatter_and_normalizes_title():
@@ -22,6 +33,28 @@ def test_clean_paper_text_removes_llm_chatter_and_normalizes_title():
     assert cleaned.startswith("# 校园社交平台建模")
     assert "#### **摘 要**" not in cleaned
     assert "摘要" in cleaned
+
+
+def test_clean_paper_text_removes_review_report_residue_and_placeholders():
+    raw = """# Paper
+
+## Results
+The result table is complete. 具体数值待补充。
+
+## 发现
+- 论文未达到国奖质量门禁。
+
+## 修改建议
+- 删除不可提交表述。
+"""
+
+    cleaned = clean_paper_text(raw)
+
+    assert "待补充" not in cleaned
+    assert "## 发现" not in cleaned
+    assert "## 修改建议" not in cleaned
+    assert "论文未达到国奖质量门禁" not in cleaned
+    assert "由本次运行产物支撑" in cleaned
 
 
 def test_evaluate_paper_quality_flags_thin_draft():
@@ -190,6 +223,177 @@ Ref. 2 reports a comparison.
     assert any("Formula numbering inconsistent" in issue for issue in report.issues)
     assert any("Symbol definition mismatch" in issue for issue in report.issues)
     assert any("Citation format issue" in issue for issue in report.issues)
+
+
+def test_evaluate_paper_quality_blocks_weak_national_award_structure():
+    text = """# Paper
+
+## Abstract
+Problem 1 and Problem 2 are solved with objective 12.5, score 88.0, error 0.31, stability 0.91, and coverage 0.83.
+
+## Keywords
+optimization; validation; sensitivity
+
+## Model
+The model is described in prose.
+
+## Results
+| metric | value |
+| --- | --- |
+| objective | 12.5 |
+Problem 1 obtains score 88.0.
+
+## References
+[1] Zhang. Model validation. Journal, 2024.
+"""
+
+    report = evaluate_paper_quality(text)
+
+    assert any("Award structure weak" in issue for issue in report.issues)
+    assert any("Problem-answer closure weak" in issue for issue in report.issues)
+    assert any("Model formulation weak" in issue for issue in report.issues)
+    assert any("Award structure weak" in issue for issue in submission_blocking_issues(report))
+    assert report.score < 82
+
+
+def test_paper_evidence_audit_flags_cvar_claim_without_tail_metrics(tmp_path):
+    paper = """# Paper
+
+## Abstract
+The CVaR tail risk model improves the solution and gives reliable decisions.
+
+## Results
+| metric | value |
+| --- | --- |
+| objective | 12.5 |
+"""
+
+    audit = audit_paper_evidence_density(paper, workspace_root=tmp_path)
+
+    assert any("Risk model evidence weak: cvar_optimization" in issue for issue in audit.issues)
+    assert audit.metrics["claimed_risk_models"] == 1
+
+
+def test_paper_evidence_audit_accepts_cvar_with_table_and_metrics(tmp_path):
+    tables = tmp_path / "tables"
+    logs = tmp_path / "logs"
+    tables.mkdir()
+    logs.mkdir()
+    pd.DataFrame(
+        {
+            "var_loss": [25.0],
+            "cvar_loss": [45.0],
+            "tail_scenario_count": [1],
+            "risk_adjusted_score": [30.0],
+        }
+    ).to_csv(tables / "result_cvar_optimization.csv", index=False)
+    (logs / "model_selection_report.json").write_text(
+        json.dumps({"selected_model_ids": ["cvar_optimization"]}),
+        encoding="utf-8",
+    )
+    paper = """# Paper
+
+## Abstract
+The CVaR model obtains var_loss 25.0, cvar_loss 45.0, tail_scenario_count 1, risk_adjusted_score 30.0, and objective 12.5.
+
+## Results
+| metric | value |
+| --- | --- |
+| var_loss | 25.0 |
+| cvar_loss | 45.0 |
+| tail_scenario_count | 1 |
+| risk_adjusted_score | 30.0 |
+"""
+
+    audit = audit_paper_evidence_density(paper, workspace_root=tmp_path)
+
+    assert not any("Risk model evidence weak" in issue for issue in audit.issues)
+    assert not any("Claimed high-level model has no matching" in issue for issue in audit.issues)
+    assert audit.metrics["cvar_optimization_metric_hits"] >= 2
+    assert audit.metrics["cvar_optimization_table_metric_hits"] >= 2
+
+
+def test_paper_evidence_audit_flags_high_level_table_without_model_metrics(tmp_path):
+    tables = tmp_path / "tables"
+    logs = tmp_path / "logs"
+    tables.mkdir()
+    logs.mkdir()
+    pd.DataFrame({"objective": [12.5], "score": [88.0]}).to_csv(
+        tables / "result_cvar_optimization.csv",
+        index=False,
+    )
+    (logs / "model_selection_report.json").write_text(
+        json.dumps({"selected_model_ids": ["cvar_optimization"]}),
+        encoding="utf-8",
+    )
+    paper = """# Paper
+
+## Abstract
+The CVaR model obtains var_loss 25.0, cvar_loss 45.0, tail_scenario_count 1, risk_adjusted_score 30.0, and objective 12.5.
+
+## Results
+| metric | value |
+| --- | --- |
+| var_loss | 25.0 |
+| cvar_loss | 45.0 |
+| risk_adjusted_score | 30.0 |
+"""
+
+    audit = audit_paper_evidence_density(paper, workspace_root=tmp_path)
+
+    assert any(
+        "High-level model table lacks model-specific metrics: cvar_optimization" in issue
+        for issue in audit.issues
+    )
+    assert audit.metrics["cvar_optimization_table_metric_hits"] == 0
+
+
+def test_paper_evidence_audit_flags_selected_high_level_model_missing_from_paper(tmp_path):
+    tables = tmp_path / "tables"
+    logs = tmp_path / "logs"
+    tables.mkdir()
+    logs.mkdir()
+    pd.DataFrame({"cvar_loss": [45.0], "risk_adjusted_score": [30.0]}).to_csv(
+        tables / "result_cvar_optimization.csv",
+        index=False,
+    )
+    (logs / "model_selection_report.json").write_text(
+        json.dumps({"selected_model_ids": ["cvar_optimization"]}),
+        encoding="utf-8",
+    )
+    paper = """# Paper
+
+## Abstract
+The optimization model obtains objective 12.5, stability 0.91, error 0.31, coverage 0.83, and score 88.0.
+
+## Results
+| metric | value |
+| --- | --- |
+| objective | 12.5 |
+| stability | 0.91 |
+"""
+
+    audit = audit_paper_evidence_density(paper, workspace_root=tmp_path)
+
+    assert any(
+        "Selected high-level model missing from paper narrative: cvar_optimization" in issue
+        for issue in audit.issues
+    )
+    assert audit.metrics["selected_risk_models_missing_narrative"] == 1
+
+
+def test_evaluate_paper_quality_includes_p2_evidence_density_gate():
+    text = _paper_fixture(
+        keyword_line="关键词：CVaR；tail risk；robust optimization",
+        table_block="| metric | value |\n| --- | --- |\n| objective | 12.5 |",
+        extra_result="本文采用 CVaR tail risk model 控制极端损失。",
+    )
+
+    report = evaluate_paper_quality(text)
+
+    assert any("Risk model evidence weak: cvar_optimization" in issue for issue in report.issues)
+    assert report.metrics["claimed_risk_models"] >= 1
+
 
 def _paper_fixture(
     *,

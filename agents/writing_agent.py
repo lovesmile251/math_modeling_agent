@@ -480,6 +480,8 @@ class WritingAgent(Agent):
         claims = ""
         if state.claim_evidence_map:
             claims = "\n".join(f"- [{c.claim_id}] {c.claim}" for c in state.claim_evidence_map.claims[:20])
+        innovation_text = self._build_innovation_input(state)
+        comparison_text = self._build_comparison_input(state)
 
         return "\n\n".join(
             [
@@ -494,6 +496,8 @@ class WritingAgent(Agent):
                 "可引用图：\n" + figures,
                 "已有产物：\n" + artifacts,
                 "审稿检查：\n" + state.notes.get(K_REVIEW_REPORT, "")[:1500],
+                "模型创新点与论文叙事钩子：\n" + innovation_text[:2500],
+                "模型对比要求：\n" + comparison_text[:2000],
             ]
         )
 
@@ -584,10 +588,30 @@ class WritingAgent(Agent):
                         exts = inn.get("innovation_extensions", [])
                         if exts:
                             lines.append(f"  可用的创新扩展: {', '.join(exts)}")
+                    narrative = report.get("paper_model_narrative", [])
+                    if narrative:
+                        lines.append("")
+                        lines.append("论文建模叙事钩子：")
+                        lines.extend(self._format_model_narrative_lines(narrative))
                     return "\n".join(lines)
+                narrative = report.get("paper_model_narrative", [])
+                if narrative:
+                    return "\n".join(["论文建模叙事钩子：", *self._format_model_narrative_lines(narrative)])
             return "（无创新建议记录，请根据模型选择报告中的tier信息自行提炼）"
         except Exception:
             return "（无法读取创新建议）"
+
+    def _format_model_narrative_lines(self, narrative: list[dict]) -> list[str]:
+        lines: list[str] = []
+        for item in narrative:
+            hooks = "；".join(item.get("paper_hooks", [])[:2])
+            metrics = "、".join(item.get("key_metrics", [])[:5])
+            lines.append(
+                f"- {item.get('label', item.get('model_id', ''))}: "
+                f"{item.get('paper_role', '')}；{hooks}；核心指标={metrics}；"
+                f"对比重点={item.get('comparison_focus', '')}"
+            )
+        return lines
 
     def _build_comparison_input(self, state: WorkflowState) -> str:
         """Build model comparison requirements for the LLM prompt."""

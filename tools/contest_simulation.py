@@ -8,11 +8,14 @@ from typing import Any
 from agents.base import (
     K_EXPORT_QUALITY_GATE,
     K_INNOVATION_EVIDENCE_GATE,
+    K_PAPER_EVIDENCE_GATE,
     K_STRONG_BASELINE_GATE,
     K_TASK_TRACEABILITY_GATE,
 )
 from tools.answer_correctness import audit_workspace_correctness, load_gold_expectations
+from tools.final_delivery_benchmark import build_final_delivery_benchmark, write_final_delivery_benchmark
 from tools.file_tool import write_text
+from tools.pressure_audit import build_pressure_audit, write_pressure_audit
 from tools.real_case_drill import run_real_case_drill
 
 
@@ -35,8 +38,12 @@ def run_contest_simulation(
     timeout_seconds: int = 300,
     time_budget_hours: float = 6.0,
     gold_expectations_path: Path | None = None,
+    candidate_profile: bool = False,
 ) -> dict[str, Any]:
     """Run real cases and score them with a contest-style blind review rubric."""
+    resolved_export_formats = export_formats
+    if candidate_profile and resolved_export_formats is None:
+        resolved_export_formats = ["docx"]
     drill_summary = run_real_case_drill(
         corpus_index_path=corpus_index_path,
         corpus_root=corpus_root,
@@ -45,16 +52,33 @@ def run_contest_simulation(
         case_ids=case_ids,
         limit=limit,
         use_llm=use_llm,
-        export_formats=export_formats,
+        export_formats=resolved_export_formats,
         max_rows_per_file=max_rows_per_file,
         timeout_seconds=timeout_seconds,
     )
+    time_budget_seconds = max(int(time_budget_hours * 3600), 1)
     contest_summary = evaluate_contest_readiness(
         drill_summary,
-        time_budget_seconds=max(int(time_budget_hours * 3600), 1),
+        time_budget_seconds=time_budget_seconds,
         gold_expectations=load_gold_expectations(gold_expectations_path),
     )
+    contest_summary["run_profile"] = {
+        "candidate_profile": candidate_profile,
+        "export_formats": list(resolved_export_formats or []),
+        "use_llm": use_llm,
+        "max_rows_per_file": max_rows_per_file,
+        "timeout_seconds": timeout_seconds,
+        "time_budget_seconds": time_budget_seconds,
+    }
     write_contest_summary(contest_summary, output_dir)
+    pressure_audit = build_pressure_audit(
+        drill_summary,
+        contest_summary,
+        time_budget_seconds=time_budget_seconds,
+    )
+    write_pressure_audit(pressure_audit, output_dir)
+    final_benchmark = build_final_delivery_benchmark(contest_summary, pressure_audit)
+    write_final_delivery_benchmark(final_benchmark, output_dir)
     return contest_summary
 
 
@@ -344,6 +368,7 @@ def _gate_integrity(gates: dict[str, Any]) -> dict[str, Any]:
         K_TASK_TRACEABILITY_GATE,
         K_STRONG_BASELINE_GATE,
         K_INNOVATION_EVIDENCE_GATE,
+        K_PAPER_EVIDENCE_GATE,
     )
     if not gates:
         return {"score": 0.5, "failures": [], "unknown": list(expected)}
@@ -499,6 +524,11 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=int, default=300)
     parser.add_argument("--time-budget-hours", type=float, default=6.0)
     parser.add_argument("--gold-expectations", type=Path, default=None)
+    parser.add_argument(
+        "--candidate-profile",
+        action="store_true",
+        help="Run strict final-delivery profile; defaults export to docx when --export is omitted.",
+    )
     args = parser.parse_args()
 
     max_rows = None if args.full_data else max(args.max_rows_per_file, 1)
@@ -516,6 +546,7 @@ def main() -> None:
         timeout_seconds=args.timeout_seconds,
         time_budget_hours=args.time_budget_hours,
         gold_expectations_path=args.gold_expectations,
+        candidate_profile=args.candidate_profile,
     )
     compact = {key: value for key, value in summary.items() if key != "results"}
     print(json.dumps(compact, ensure_ascii=False))

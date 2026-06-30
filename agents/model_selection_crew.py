@@ -93,6 +93,7 @@ class CandidateModel:
     validation_plan: list[str] = field(default_factory=list)  # suggested validation methods
     comparison_candidates: list[str] = field(default_factory=list)  # models to compare against
     contract: dict[str, Any] = field(default_factory=dict)
+    paper_hooks: list[str] = field(default_factory=list)  # paper-ready modeling narrative cues
 
     @property
     def total_score(self) -> int:
@@ -152,7 +153,7 @@ class TaskDecompositionAgent:
     KEYWORDS: dict[str, tuple[str, ...]] = {
         "forecast": (
             "预测", "趋势", "未来", "时间序列", "外推", "forecast", "trend",
-            "future", "time series",
+            "future", "time series", "rmse", "mse", "mae", "mape", "预测", "趋势", "未来", "时间序列", "外推", "娴嬫湭",
         ),
         "evaluation": (
             "评价", "评估", "综合评价", "指标体系", "权重", "排序", "排名", "缺口",
@@ -229,7 +230,9 @@ class TaskDecompositionAgent:
         tasks: list[SelectionTask] = []
         seen: set[tuple[str, str]] = set()
         for segment_id, segment in segments:
-            text = f"{segment} {column_text}".lower()
+            text = segment.lower()
+            if len(segments) == 1:
+                text = f"{text} {column_text}".lower()
             for task_type, terms in self.KEYWORDS.items():
                 hits = tuple(term for term in terms if self._term_matches(term, text))
                 if not hits:
@@ -823,6 +826,22 @@ class CandidateModelAgent:
             self._add_candidate(candidates, "capacity_gap", "evaluation", 36, "data profile detected paired demand-capacity fields", "capacity gap")
         if profile.has_objective_constraint_combo:
             self._add_candidate(candidates, "resource_allocation", "optimization", 30, "data profile detected objective and resource constraint fields", "resource optimization")
+            if self._has_uncertainty_intent(text):
+                for model_id, score, reason in (
+                    ("robust_optimization", 42, "objective-resource fields with uncertainty/risk signal"),
+                    ("scenario_optimization", 40, "objective-resource fields with scenario or perturbation signal"),
+                    ("chance_constrained_optimization", 38, "objective-resource fields with probabilistic feasibility signal"),
+                ):
+                    self._add_candidate(candidates, model_id, "optimization", score, reason, "risk-aware resource optimization")
+            if self._has_tail_risk_intent(text):
+                self._add_candidate(
+                    candidates,
+                    "cvar_optimization",
+                    "optimization",
+                    50,
+                    "objective-resource fields with tail-risk/CVaR signal",
+                    "tail-risk resource optimization",
+                )
         if self._has_cement_esp_schema(profile):
             self._add_candidate(
                 candidates,
@@ -849,6 +868,10 @@ class CandidateModelAgent:
             (("assignment", "指派", "匹配"), "assignment_plan", "optimization"),
             (("scheduling", "schedule", "调度", "排程"), "scheduling_plan", "optimization"),
             (("knapsack", "背包"), "knapsack_01", "optimization"),
+            (("robust", "uncertainty", "perturbation", "risk-aware", "鲁棒", "稳健", "不确定", "扰动"), "robust_optimization", "optimization"),
+            (("scenario", "stochastic", "stress case", "情景", "场景", "随机规划"), "scenario_optimization", "optimization"),
+            (("chance constraint", "chance-constrained", "service level", "confidence level", "probabilistic constraint", "机会约束", "服务水平", "概率约束"), "chance_constrained_optimization", "optimization"),
+            (("cvar", "tail risk", "var loss", "expected shortfall", "downside risk", "尾部风险", "条件风险价值"), "cvar_optimization", "optimization"),
             (("crop", "planting", "farmland", "acreage"), "crop_planting_plan", "optimization"),
             (("seasonal", "季节"), "seasonal_forecast", "forecast"),
             (("pca", "主成分"), "pca", "clustering"),
@@ -907,6 +930,51 @@ class CandidateModelAgent:
                     88,
                 )
 
+    def _has_uncertainty_intent(self, text: str) -> bool:
+        terms = (
+            "uncertainty",
+            "uncertain",
+            "risk",
+            "robust",
+            "stochastic",
+            "scenario",
+            "probability",
+            "probabilistic",
+            "perturbation",
+            "confidence",
+            "service_level",
+            "sigma",
+            "variance",
+            "volatility",
+            "不确定",
+            "扰动",
+            "风险",
+            "情景",
+            "场景",
+            "概率",
+            "稳健",
+            "鲁棒",
+        )
+        return any(term in text for term in terms)
+
+    def _has_tail_risk_intent(self, text: str) -> bool:
+        terms = (
+            "cvar",
+            "var",
+            "tail risk",
+            "tail-risk",
+            "expected shortfall",
+            "downside",
+            "loss",
+            "shortage",
+            "penalty",
+            "尾部风险",
+            "条件风险价值",
+            "损失",
+            "亏损",
+        )
+        return any(term in text for term in terms)
+
     def _has_cement_esp_schema(self, profile: DataProfile) -> bool:
         columns = {column.lower() for column in profile.columns}
         required = {
@@ -947,7 +1015,15 @@ class ModelSuitabilityAgent:
     COMPARISON_HINTS: dict[str, tuple[str, ...]] = {
         "forecast": ("trend_forecast", "smoothing_forecast", "ridge_regression", "gradient_boosting"),
         "evaluation": ("entropy_weights", "topsis_rank", "grey_relation", "vikor"),
-        "optimization": ("resource_allocation", "cement_esp_optimization", "knapsack_01", "integer_programming", "nonlinear_optimization"),
+        "optimization": (
+            "resource_allocation",
+            "knapsack_01",
+            "integer_programming",
+            "robust_optimization",
+            "scenario_optimization",
+            "chance_constrained_optimization",
+            "cvar_optimization",
+        ),
         "classification": ("logistic_classifier", "naive_bayes_classifier", "knn_classifier"),
         "clustering": ("kmeans_cluster", "dbscan_cluster", "hierarchical_cluster"),
         "network": ("graph_centrality", "graph_shortest_paths", "community_detection"),
@@ -1063,6 +1139,29 @@ class ModelSuitabilityAgent:
                 candidate.data_score += 28
                 candidate.reasons.append("complete cement ESP process schema detected")
 
+        risk_optimization_models = {
+            "robust_optimization",
+            "scenario_optimization",
+            "chance_constrained_optimization",
+            "cvar_optimization",
+        }
+        if candidate.model_id in risk_optimization_models:
+            if profile.has_objective_constraint_combo:
+                candidate.data_score += 16
+                candidate.reasons.append("objective-resource constraint combination detected")
+            if self._has_uncertainty_signal(profile):
+                candidate.data_score += 12
+                candidate.reasons.append("uncertainty/risk columns or scenario fields detected")
+            if candidate.model_id == "cvar_optimization" and self._has_tail_risk_signal(profile):
+                candidate.data_score += 12
+                candidate.paper_hooks.append("Use VaR/CVaR to explain tail-loss control and downside-risk tradeoff.")
+            elif candidate.model_id == "chance_constrained_optimization":
+                candidate.paper_hooks.append("Use service level and violation probability to explain probabilistic feasibility.")
+            elif candidate.model_id == "scenario_optimization":
+                candidate.paper_hooks.append("Use expected value, worst-case value, and regret to compare scenarios.")
+            elif candidate.model_id == "robust_optimization":
+                candidate.paper_hooks.append("Use robust objective and capacity slack to explain feasibility under perturbation.")
+
         if candidate.model_id in {"logistic_classifier", "naive_bayes_classifier", "knn_classifier", "smote_balance"}:
             if profile.binary_label_columns:
                 candidate.data_score += 10
@@ -1075,6 +1174,31 @@ class ModelSuitabilityAgent:
             if profile.has_edge_table:
                 candidate.data_score += 12
                 candidate.reasons.append("source-target edge table detected")
+
+    def _has_uncertainty_signal(self, profile: DataProfile) -> bool:
+        text = " ".join(profile.columns).lower()
+        terms = (
+            "uncertainty",
+            "risk",
+            "scenario",
+            "probability",
+            "prob",
+            "sigma",
+            "std",
+            "variance",
+            "volatility",
+            "confidence",
+            "service_level",
+            "alpha",
+            "loss",
+            "penalty",
+        )
+        return any(term in text for term in terms)
+
+    def _has_tail_risk_signal(self, profile: DataProfile) -> bool:
+        text = " ".join(profile.columns).lower()
+        terms = ("cvar", "var", "tail", "loss", "shortage", "penalty", "downside")
+        return any(term in text for term in terms)
 
     def _has_cement_esp_schema(self, profile: DataProfile) -> bool:
         columns = {column.lower() for column in profile.columns}
@@ -1359,6 +1483,16 @@ class SelectionSynthesisAgent:
         else:
             lines.append("- 未选择可执行模型。")
 
+        narrative = self._paper_model_narrative(selected)
+        if narrative:
+            lines.extend(["", "## 论文建模叙事钩子"])
+            for item in narrative[:8]:
+                metrics = "、".join(item["key_metrics"])
+                lines.append(
+                    f"- {item['label']}（`{item['model_id']}`）：{item['paper_role']}；"
+                    f"核心指标：{metrics}；对比重点：{item['comparison_focus']}"
+                )
+
         lines.extend(["", "## 未采用或降级的候选"])
         if rejected:
             for item in rejected[:8]:
@@ -1405,6 +1539,7 @@ class SelectionSynthesisAgent:
             "reference_algorithms": [asdict(item) for item in references],
             "model_comparison_plan": self._comparison_plan(selected),
             "innovation_recommendations": self._innovation_summary(selected),
+            "paper_model_narrative": self._paper_model_narrative(selected),
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -1449,10 +1584,22 @@ class SelectionSynthesisAgent:
                 "task_type": item.task_type,
                 "comparison_candidates": item.comparison_candidates,
                 "validation_plan": item.validation_plan,
-                "metrics": self._metrics_for_task_type(item.task_type),
+                "metrics": self._metrics_for_model(item),
             }
             plans.append(plan)
         return plans
+
+    def _metrics_for_model(self, item: CandidateModel) -> list[str]:
+        metrics = list(self._metrics_for_task_type(item.task_type))
+        model_metrics = {
+            "robust_optimization": ["robust_value", "robust_resource", "capacity_slack", "uncertainty_rate"],
+            "scenario_optimization": ["expected_value", "worst_case_value", "max_regret", "capacity_slack"],
+            "chance_constrained_optimization": ["safe_resource", "service_level", "feasibility_probability", "violation_probability"],
+            "cvar_optimization": ["var_loss", "cvar_loss", "tail_scenario_count", "risk_adjusted_score"],
+            "seir_model": ["basic_reproduction_number", "mean_incubation_period", "mean_infectious_period", "compartment_rmse"],
+        }
+        metrics.extend(model_metrics.get(item.model_id, []))
+        return list(dict.fromkeys(metrics))
 
     def _metrics_for_task_type(self, task_type: str) -> list[str]:
         """Return appropriate validation metrics for a task type."""
@@ -1483,6 +1630,55 @@ class SelectionSynthesisAgent:
                     "reason": f"采用 {item.tier} 级方案，创新评分 {item.innovation_score}/10",
                 })
         return innovations
+
+    def _paper_model_narrative(self, selected: tuple[CandidateModel, ...]) -> list[dict[str, Any]]:
+        narrative: list[dict[str, Any]] = []
+        templates = {
+            "robust_optimization": {
+                "paper_role": "主模型或稳健性增强模型",
+                "why_use": "参数存在扰动时，优先证明方案在最坏或保守情形下仍可行。",
+                "comparison_focus": "与确定性资源分配比较目标值损失和容量松弛。",
+                "key_metrics": ["robust_value", "robust_resource", "capacity_slack", "uncertainty_rate"],
+            },
+            "scenario_optimization": {
+                "paper_role": "多情景决策模型",
+                "why_use": "题目存在不同市场、天气、需求或压力情景时，用统一方案比较期望收益和最坏表现。",
+                "comparison_focus": "比较期望值、最坏情景值和最大遗憾。",
+                "key_metrics": ["expected_value", "worst_case_value", "max_regret", "capacity_slack"],
+            },
+            "chance_constrained_optimization": {
+                "paper_role": "概率可行性模型",
+                "why_use": "约束含随机波动时，将风险容忍度转化为服务水平和违反概率。",
+                "comparison_focus": "比较确定性方案与机会约束方案的可行概率和资源冗余。",
+                "key_metrics": ["service_level", "safe_resource", "feasibility_probability", "violation_probability"],
+            },
+            "cvar_optimization": {
+                "paper_role": "尾部风险控制模型",
+                "why_use": "当少数极端情景会造成较大损失时，用 CVaR 衡量并压低尾部损失。",
+                "comparison_focus": "比较期望收益、VaR、CVaR 和风险调整收益。",
+                "key_metrics": ["var_loss", "cvar_loss", "tail_scenario_count", "risk_adjusted_score"],
+            },
+            "seir_model": {
+                "paper_role": "机理传播模型",
+                "why_use": "存在潜伏期或暴露状态时，用 SEIR 区分感染传播和潜伏转化过程。",
+                "comparison_focus": "与 SIR 比较 R0、潜伏期、感染期和残差。",
+                "key_metrics": ["basic_reproduction_number", "mean_incubation_period", "mean_infectious_period"],
+            },
+        }
+        for item in selected:
+            template = templates.get(item.model_id)
+            if not template:
+                continue
+            narrative.append(
+                {
+                    "model_id": item.model_id,
+                    "label": item.label,
+                    "task_type": item.task_type,
+                    "paper_hooks": list(dict.fromkeys([*item.paper_hooks, template["why_use"]])),
+                    **template,
+                }
+            )
+        return narrative
 
 
 class ModelSelectionCrew:

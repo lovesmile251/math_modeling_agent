@@ -173,9 +173,11 @@ class DecisionAgent(Agent):
             if i.get("severity") in ("high", "critical")
         ]
         if high_severity_issues and selected_ids:
-            log.info("Critique found %d high-severity issues; keeping only first 2 models as safe choice.",
-                     len(high_severity_issues))
-            selected_ids = selected_ids[:2]
+            log.info(
+                "Critique found %d high-severity issues; capping model set while preserving task coverage.",
+                len(high_severity_issues),
+            )
+            selected_ids = selected_ids[:6]
 
         decision.selected_model_ids = selected_ids
         decision.primary_model_id = selected_ids[0] if selected_ids else ""

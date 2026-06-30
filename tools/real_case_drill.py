@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -127,6 +128,7 @@ def run_single_case_drill(
         runs_root / _safe_run_name(case.case_id),
         project_root=PROJECT_ROOT,
     )
+    _reset_workspace_outputs(workspace)
     workspace.ensure_dirs()
     data_files = _stage_case_data_files(case, corpus_root, workspace.data_dir, max_rows_per_file)
 
@@ -261,6 +263,30 @@ def _stage_case_data_files(
         frame.to_csv(target, index=False, encoding="utf-8-sig")
         staged.append(target)
     return staged
+
+
+def _reset_workspace_outputs(workspace: WorkspaceConfig) -> None:
+    """Clear one case run directory before rerun to avoid stale artifact scoring."""
+    root = workspace.root.resolve()
+    for folder in (
+        workspace.code_dir,
+        workspace.data_dir,
+        workspace.figures_dir,
+        workspace.input_dir,
+        workspace.logs_dir,
+        workspace.paper_dir,
+        workspace.tables_dir,
+    ):
+        resolved = folder.resolve()
+        if root not in (resolved, *resolved.parents):
+            raise ValueError(f"Refusing to clear folder outside workspace: {resolved}")
+        if not resolved.exists():
+            continue
+        for child in resolved.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
 
 
 def _read_sample_frame(path: Path, max_rows: int) -> pd.DataFrame:

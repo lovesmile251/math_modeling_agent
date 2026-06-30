@@ -5,7 +5,17 @@ from zipfile import ZipFile
 
 import pytest
 
-from tools.exporters import check_export_layout, export_document, export_docx, export_latex, export_pdf
+from tools.exporters import (
+    DEFAULT_DOCX_TEMPLATE_SHA256,
+    DEFAULT_DOCX_TEMPLATE_PATH,
+    check_docx_template_layout,
+    check_export_layout,
+    docx_template_field_mapping,
+    export_document,
+    export_docx,
+    export_latex,
+    export_pdf,
+)
 from tools.report_builder import (
     CodeBlock,
     Document,
@@ -69,6 +79,73 @@ def test_export_docx(sample_document, tmp_path):
         assert not any("<m:oMath" in name.decode() if isinstance(name, bytes) else "<m:oMath" in name for name in package.namelist())
         assert "<m:oMath" not in document_xml  # no raw OMML tags leak
         assert any(name.startswith("word/media/") for name in package.namelist())  # images embedded
+
+
+def test_national_contest_docx_template_asset_matches_registered_hash():
+    assert DEFAULT_DOCX_TEMPLATE_PATH.exists()
+
+    import hashlib
+
+    asset_hash = hashlib.sha256(DEFAULT_DOCX_TEMPLATE_PATH.read_bytes()).hexdigest()
+
+    assert asset_hash == DEFAULT_DOCX_TEMPLATE_SHA256
+
+
+def test_docx_template_field_mapping_documents_formal_export_roles():
+    mapping = docx_template_field_mapping()
+    by_role = {item["role"]: item for item in mapping}
+
+    assert {
+        "title",
+        "abstract_heading",
+        "keywords",
+        "section_heading",
+        "subsection_heading",
+        "body",
+        "display_math",
+        "table",
+        "figure",
+    }.issubset(by_role)
+    assert by_role["title"]["source"] == "Document.title"
+    assert "基于XXX模型" in by_role["title"]["template_anchor"]
+    assert by_role["section_heading"]["docx_style"] == "Heading 1"
+
+
+def test_export_docx_uses_national_contest_word_template(tmp_path):
+    doc = Document(
+        title="模板测试论文",
+        blocks=[
+            Heading(level=2, text="摘要"),
+            Paragraph(text="这里是摘要正文。"),
+            Heading(level=1, text="问题重述"),
+            Paragraph(text="这里是正文。"),
+        ],
+    )
+
+    out = export_docx(doc, tmp_path / "templated.docx")
+
+    from docx import Document as DocxDocument
+
+    template = DocxDocument(str(DEFAULT_DOCX_TEMPLATE_PATH))
+    rendered = DocxDocument(str(out))
+    text = "\n".join(p.text for p in rendered.paragraphs)
+
+    assert "模板测试论文" in text
+    assert "基于XXX模型的XXX问题研究" not in text
+    assert rendered.sections[0].page_width == template.sections[0].page_width
+    assert rendered.sections[0].page_height == template.sections[0].page_height
+    assert rendered.sections[0].left_margin == template.sections[0].left_margin
+    assert rendered.sections[0].right_margin == template.sections[0].right_margin
+    assert rendered.paragraphs[0].alignment == template.paragraphs[0].alignment
+    assert rendered.paragraphs[1].alignment == template.paragraphs[1].alignment
+    assert rendered.paragraphs[1].runs[0].font.size == template.paragraphs[1].runs[0].font.size
+    assert any(p.text == "问题重述" and p.style.name == "Heading 1" for p in rendered.paragraphs)
+
+    layout = check_docx_template_layout(out)
+    assert layout.passed, layout.warnings
+    assert layout.template_sha256 == DEFAULT_DOCX_TEMPLATE_SHA256
+    assert layout.metrics["template_placeholder_hits"] == 0
+    assert layout.metrics["field_mapping_count"] >= 8
 
 
 def test_export_pdf(sample_document, tmp_path):

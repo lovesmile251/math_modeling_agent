@@ -216,7 +216,7 @@ def fetch_references(
 
 def format_references_section(refs: list[str]) -> str:
     """Return a Markdown-formatted references section."""
-    lines = ["## 参考文献", ""]
+    lines = ["## References 参考文献", ""]
     for i, ref in enumerate(refs, 1):
         lines.append(f"[{i}] {ref}")
     return "\n".join(lines)

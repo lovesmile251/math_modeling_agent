@@ -143,6 +143,97 @@ def sir_epidemic_model(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def seir_epidemic_model(df: pd.DataFrame) -> pd.DataFrame:
+    numeric = _numeric_frame(df)
+    if numeric.shape[0] < 4:
+        return pd.DataFrame()
+
+    susceptible_column = _find_column(numeric, ("susceptible", "sus", "s", "易感"))
+    exposed_column = _find_column(
+        numeric,
+        ("exposed", "latent", "incubation", "e", "潜伏", "暴露"),
+        exclude={susceptible_column},
+    )
+    infected_column = _find_column(
+        numeric,
+        ("infected", "infectious", "active", "case", "cases", "i", "感染", "病例"),
+        exclude={susceptible_column, exposed_column},
+    )
+    recovered_column = _find_column(
+        numeric,
+        ("recovered", "removed", "recovery", "r", "康复", "移除", "治愈"),
+        exclude={susceptible_column, exposed_column, infected_column},
+    )
+    if (
+        susceptible_column is None
+        or exposed_column is None
+        or infected_column is None
+        or recovered_column is None
+    ):
+        return pd.DataFrame()
+
+    data = numeric[[susceptible_column, exposed_column, infected_column, recovered_column]].dropna()
+    if len(data) < 4:
+        return pd.DataFrame()
+    s = data[susceptible_column].to_numpy(dtype=float)
+    e = data[exposed_column].to_numpy(dtype=float)
+    i = data[infected_column].to_numpy(dtype=float)
+    r = data[recovered_column].to_numpy(dtype=float)
+    if np.any(s < 0) or np.any(e < 0) or np.any(i < 0) or np.any(r < 0):
+        return pd.DataFrame()
+    population = s + e + i + r
+    n = float(np.nanmedian(population))
+    if not np.isfinite(n) or n <= 0:
+        return pd.DataFrame()
+
+    ds = np.diff(s)
+    de = np.diff(e)
+    di = np.diff(i)
+    dr = np.diff(r)
+    infection_term = s[:-1] * i[:-1] / n
+    valid_beta = infection_term > 0
+    valid_sigma = e[:-1] > 0
+    valid_gamma = i[:-1] > 0
+    if not valid_beta.any() or not valid_sigma.any() or not valid_gamma.any():
+        return pd.DataFrame()
+
+    beta = float(np.mean((-ds[valid_beta]) / infection_term[valid_beta]))
+    sigma = float(np.mean((beta * infection_term[valid_sigma] - de[valid_sigma]) / e[:-1][valid_sigma]))
+    gamma = float(np.mean(dr[valid_gamma] / i[:-1][valid_gamma]))
+    if not all(np.isfinite(value) for value in (beta, sigma, gamma)):
+        return pd.DataFrame()
+    if sigma <= 0 or gamma <= 0:
+        return pd.DataFrame()
+
+    predicted_ds = -beta * infection_term
+    predicted_de = beta * infection_term - sigma * e[:-1]
+    predicted_di = sigma * e[:-1] - gamma * i[:-1]
+    predicted_dr = gamma * i[:-1]
+    return pd.DataFrame(
+        [
+            {
+                "method": "seir_epidemic_model",
+                "susceptible": str(susceptible_column),
+                "exposed": str(exposed_column),
+                "infected": str(infected_column),
+                "recovered": str(recovered_column),
+                "beta": beta,
+                "sigma_incubation_rate": sigma,
+                "gamma_recovery_rate": gamma,
+                "basic_reproduction_number": float(beta / gamma) if gamma != 0 else np.nan,
+                "mean_incubation_period": float(1.0 / sigma),
+                "mean_infectious_period": float(1.0 / gamma),
+                "population": n,
+                "rmse_susceptible_delta": _rmse(ds, predicted_ds),
+                "rmse_exposed_delta": _rmse(de, predicted_de),
+                "rmse_infected_delta": _rmse(di, predicted_di),
+                "rmse_recovered_delta": _rmse(dr, predicted_dr),
+                "sample_size": int(len(data)),
+            }
+        ]
+    )
+
+
 def lotka_volterra_model(df: pd.DataFrame) -> pd.DataFrame:
     numeric = _numeric_frame(df)
     if numeric.shape[0] < 4:

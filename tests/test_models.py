@@ -9,6 +9,13 @@ from models.diagnostics.capacity import demand_capacity_gap
 from models.evaluation.entropy_weight import entropy_weights
 from models.evaluation.topsis import topsis_rank
 from models.inventory.policy import inventory_policy
+from models.mechanism.dynamics import seir_epidemic_model
+from models.optimization.advanced import (
+    chance_constrained_resource_optimization,
+    cvar_resource_optimization,
+    robust_resource_optimization,
+    scenario_resource_optimization,
+)
 from models.prediction.ml import gradient_boosting_forecast
 from models.prediction.trend import linear_trend_forecast
 from models.statistics.correlation import correlation_analysis
@@ -113,6 +120,164 @@ def test_gradient_boosting_forecast_bounds_wide_table_cost():
     assert result["max_depth"].eq(2).all()
     assert result["feature"].nunique() <= 24
     assert result["train_size"].max() <= 400
+
+
+def test_robust_resource_optimization_selects_feasible_plan():
+    df = pd.DataFrame(
+        {
+            "project": ["A", "B", "C", "D"],
+            "resource": [20.0, 30.0, 15.0, 25.0],
+            "profit": [60.0, 75.0, 36.0, 55.0],
+            "uncertainty": [0.10, 0.30, 0.05, 0.20],
+            "capacity": [55.0, 55.0, 55.0, 55.0],
+        }
+    )
+
+    result = robust_resource_optimization(df)
+
+    assert not result.empty
+    assert {
+        "selected",
+        "robust_resource",
+        "robust_value",
+        "capacity_slack",
+        "uncertainty_rate",
+    }.issubset(result.columns)
+    assert result["selected"].sum() >= 1
+    selected = result[result["selected"] == 1]
+    assert selected["robust_resource"].sum() <= result["capacity"].iloc[0] + 1e-9
+    assert result["capacity_slack"].iloc[0] >= -1e-9
+
+
+def test_scenario_resource_optimization_reports_expected_worstcase_and_regret():
+    df = pd.DataFrame(
+        {
+            "project": ["A", "B", "C", "A", "B", "C", "A", "B", "C"],
+            "scenario": [
+                "pessimistic",
+                "pessimistic",
+                "pessimistic",
+                "base",
+                "base",
+                "base",
+                "optimistic",
+                "optimistic",
+                "optimistic",
+            ],
+            "resource": [20.0, 25.0, 18.0, 20.0, 25.0, 18.0, 20.0, 25.0, 18.0],
+            "profit": [42.0, 36.0, 30.0, 60.0, 50.0, 45.0, 72.0, 56.0, 54.0],
+            "probability": [0.25, 0.25, 0.25, 0.50, 0.50, 0.50, 0.25, 0.25, 0.25],
+            "capacity": [45.0] * 9,
+        }
+    )
+
+    result = scenario_resource_optimization(df)
+
+    assert not result.empty
+    assert {
+        "scenario",
+        "selected",
+        "expected_value",
+        "worst_case_value",
+        "max_regret",
+        "capacity_slack",
+    }.issubset(result.columns)
+    assert set(result["scenario"]) == {"pessimistic", "base", "optimistic"}
+    assert result["selected"].sum() >= 3
+    selected_items = result[result["selected"] == 1]["item"].unique()
+    selected_resources = (
+        result[result["selected"] == 1]
+        .drop_duplicates("item")["resource"]
+        .sum()
+    )
+    assert len(selected_items) >= 1
+    assert selected_resources <= result["capacity"].iloc[0] + 1e-9
+    assert (result["max_regret"] >= 0).all()
+
+
+def test_chance_constrained_resource_optimization_reports_service_level_risk():
+    df = pd.DataFrame(
+        {
+            "project": ["A", "B", "C", "D"],
+            "demand": [18.0, 22.0, 12.0, 20.0],
+            "sigma": [2.0, 5.0, 1.0, 4.0],
+            "profit": [58.0, 63.0, 30.0, 50.0],
+            "capacity": [48.0, 48.0, 48.0, 48.0],
+            "service_level": [0.9, 0.9, 0.9, 0.9],
+        }
+    )
+
+    result = chance_constrained_resource_optimization(df)
+
+    assert not result.empty
+    assert {
+        "selected",
+        "safe_resource",
+        "service_level",
+        "feasibility_probability",
+        "violation_probability",
+        "capacity_slack",
+    }.issubset(result.columns)
+    assert result["selected"].sum() >= 1
+    assert result["total_safe_resource"].iloc[0] <= result["capacity"].iloc[0] + 1e-9
+    assert 0.0 <= result["violation_probability"].iloc[0] <= 1.0
+    assert result["feasibility_probability"].iloc[0] >= 0.85
+
+
+def test_cvar_resource_optimization_reports_tail_risk_metrics():
+    df = pd.DataFrame(
+        {
+            "project": ["A", "B", "C", "A", "B", "C", "A", "B", "C"],
+            "scenario": ["normal", "normal", "normal", "stress", "stress", "stress", "tail", "tail", "tail"],
+            "resource": [20.0, 25.0, 18.0, 20.0, 25.0, 18.0, 20.0, 25.0, 18.0],
+            "profit": [70.0, 64.0, 45.0, 55.0, 42.0, 40.0, 36.0, 20.0, 32.0],
+            "loss": [3.0, 5.0, 2.0, 10.0, 18.0, 9.0, 25.0, 45.0, 20.0],
+            "capacity": [45.0] * 9,
+            "alpha": [0.9] * 9,
+        }
+    )
+
+    result = cvar_resource_optimization(df)
+
+    assert not result.empty
+    assert {
+        "selected",
+        "var_loss",
+        "cvar_loss",
+        "tail_scenario_count",
+        "risk_adjusted_score",
+        "capacity_slack",
+    }.issubset(result.columns)
+    assert result["selected"].sum() >= 1
+    assert (result["cvar_loss"] >= result["var_loss"]).all()
+    assert (result["tail_scenario_count"] >= 1).all()
+    assert result["total_selected_resource"].iloc[0] <= result["capacity"].iloc[0] + 1e-9
+
+
+def test_seir_epidemic_model_estimates_compartment_parameters():
+    df = pd.DataFrame(
+        {
+            "susceptible": [990.0, 986.0, 980.0, 971.0, 960.0, 946.0],
+            "exposed": [5.0, 7.0, 10.0, 14.0, 19.0, 25.0],
+            "infected": [4.0, 5.0, 7.0, 10.0, 14.0, 19.0],
+            "recovered": [1.0, 2.0, 3.0, 5.0, 7.0, 10.0],
+        }
+    )
+
+    result = seir_epidemic_model(df)
+
+    assert not result.empty
+    assert {
+        "beta",
+        "sigma_incubation_rate",
+        "gamma_recovery_rate",
+        "basic_reproduction_number",
+        "mean_incubation_period",
+        "mean_infectious_period",
+    }.issubset(result.columns)
+    assert result["beta"].iloc[0] > 0
+    assert result["sigma_incubation_rate"].iloc[0] > 0
+    assert result["gamma_recovery_rate"].iloc[0] > 0
 
 
 def test_logistic_classifier_handles_multiclass_as_one_vs_rest():

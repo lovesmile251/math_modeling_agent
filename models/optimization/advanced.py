@@ -200,6 +200,493 @@ def multiobjective_weighted_sum(df: pd.DataFrame) -> pd.DataFrame:
     return result.sort_values(["rank", "row_index"]).reset_index(drop=True)
 
 
+def robust_resource_optimization(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a conservative resource-allocation plan under row-level uncertainty.
+
+    The routine is intentionally solver-light: it identifies a benefit column,
+    a resource/cost column, and an optional uncertainty/risk column, then selects
+    alternatives by robust benefit density while enforcing an inflated resource
+    capacity. This gives the workflow an executable robust-optimization artifact
+    even when the contest statement does not provide a fully specified stochastic
+    program.
+    """
+
+    numeric = df.select_dtypes(include="number").dropna(axis=1, how="all")
+    if numeric.shape[0] < 2 or numeric.shape[1] < 2:
+        return pd.DataFrame()
+
+    resource_col = _find_column(
+        numeric,
+        ("resource", "capacity_used", "weight", "cost", "area", "time", "budget_used", "load"),
+    )
+    value_col = _find_column(
+        numeric,
+        BENEFIT_KEYWORDS + ("reward", "margin", "objective"),
+        exclude={resource_col},
+    )
+    uncertainty_col = _find_column(
+        numeric,
+        ("uncertainty", "risk", "std", "sigma", "variance", "volatility", "error", "loss_rate", "penalty"),
+        exclude={resource_col, value_col},
+    )
+    capacity_col = _find_column(
+        numeric,
+        ("capacity", "budget", "limit", "available", "bound"),
+        exclude={resource_col, value_col, uncertainty_col},
+    )
+    item_col = _find_column(df, ("item", "name", "crop", "project", "task", "option", "node", "id"))
+
+    if resource_col is None:
+        resource_col = str(numeric.columns[0])
+    if value_col is None:
+        candidates = [str(column) for column in numeric.columns if str(column) != resource_col]
+        if not candidates:
+            return pd.DataFrame()
+        value_col = candidates[-1]
+
+    work = pd.DataFrame(
+        {
+            "row_index": numeric.index,
+            "item": df[item_col].astype(str) if item_col else [f"option_{idx}" for idx in numeric.index],
+            "resource": pd.to_numeric(numeric[resource_col], errors="coerce"),
+            "value": pd.to_numeric(numeric[value_col], errors="coerce"),
+        }
+    )
+    if uncertainty_col is not None:
+        uncertainty = pd.to_numeric(numeric[uncertainty_col], errors="coerce")
+        scale = float(uncertainty.abs().quantile(0.9)) if not uncertainty.dropna().empty else 0.0
+        if scale > 1.0:
+            uncertainty = uncertainty / scale
+        work["uncertainty"] = uncertainty.abs().clip(lower=0.0, upper=1.0)
+    else:
+        value_series = pd.to_numeric(numeric[value_col], errors="coerce")
+        coefficient = float(value_series.std() / max(abs(value_series.mean()), 1e-9)) if value_series.notna().sum() >= 2 else 0.1
+        work["uncertainty"] = min(max(coefficient, 0.05), 0.35)
+
+    work = work.dropna(subset=["resource", "value", "uncertainty"])
+    work = work[(work["resource"] > 0) & (work["value"] > 0)].reset_index(drop=True)
+    if work.empty:
+        return pd.DataFrame()
+
+    if capacity_col is not None:
+        capacity_values = pd.to_numeric(numeric[capacity_col], errors="coerce").dropna()
+        capacity = float(capacity_values.iloc[0]) if not capacity_values.empty else 0.0
+    else:
+        capacity = float(work["resource"].sum() * 0.5)
+    if capacity <= 0:
+        return pd.DataFrame()
+
+    risk_aversion = 1.0
+    budget_buffer = 0.2
+    work["robust_resource"] = work["resource"] * (1.0 + budget_buffer * work["uncertainty"])
+    work["robust_value"] = work["value"] * (1.0 - risk_aversion * work["uncertainty"]).clip(lower=0.0)
+    work["robust_density"] = work["robust_value"] / work["robust_resource"]
+    ranked = work.sort_values(["robust_density", "robust_value"], ascending=False).reset_index(drop=True)
+
+    selected: list[int] = []
+    used_resource = 0.0
+    for idx, row in ranked.iterrows():
+        candidate_resource = float(row["robust_resource"])
+        if used_resource + candidate_resource <= capacity + 1e-12:
+            selected.append(idx)
+            used_resource += candidate_resource
+
+    selected_set = set(selected)
+    selected_rows = ranked.loc[list(selected_set)] if selected_set else ranked.iloc[0:0]
+    total_value = float(selected_rows["value"].sum())
+    total_robust_value = float(selected_rows["robust_value"].sum())
+    rows = []
+    for idx, row in ranked.iterrows():
+        is_selected = idx in selected_set
+        rows.append(
+            {
+                "row_index": int(row["row_index"]),
+                "item": str(row["item"]),
+                "selected": int(is_selected),
+                "resource_column": str(resource_col),
+                "value_column": str(value_col),
+                "uncertainty_column": str(uncertainty_col) if uncertainty_col else "estimated_cv",
+                "nominal_resource": float(row["resource"]),
+                "robust_resource": float(row["robust_resource"]),
+                "nominal_value": float(row["value"]),
+                "robust_value": float(row["robust_value"]),
+                "uncertainty_rate": float(row["uncertainty"]),
+                "capacity": capacity,
+                "total_robust_resource": float(used_resource),
+                "capacity_slack": float(capacity - used_resource),
+                "total_nominal_value": float(total_value),
+                "total_robust_value": float(total_robust_value),
+                "method": "greedy_budgeted_robust_optimization",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def scenario_resource_optimization(df: pd.DataFrame) -> pd.DataFrame:
+    """Evaluate resource decisions across explicit or generated scenarios."""
+
+    numeric = df.select_dtypes(include="number").dropna(axis=1, how="all")
+    if numeric.shape[0] < 2 or numeric.shape[1] < 2:
+        return pd.DataFrame()
+
+    item_col = _find_column(df, ("item", "name", "crop", "project", "task", "option", "node", "id"))
+    scenario_col = _find_column(df, ("scenario", "case", "state", "condition"))
+    resource_col = _find_column(
+        numeric,
+        ("resource", "capacity_used", "weight", "cost", "area", "time", "budget_used", "load"),
+    )
+    value_col = _find_column(
+        numeric,
+        BENEFIT_KEYWORDS + ("reward", "margin", "objective"),
+        exclude={resource_col},
+    )
+    capacity_col = _find_column(
+        numeric,
+        ("capacity", "budget", "limit", "available", "bound"),
+        exclude={resource_col, value_col},
+    )
+    probability_col = _find_column(
+        numeric,
+        ("probability", "prob", "likelihood", "chance", "weight_scenario"),
+        exclude={resource_col, value_col, capacity_col},
+    )
+    if resource_col is None:
+        resource_col = str(numeric.columns[0])
+    if value_col is None:
+        candidates = [str(column) for column in numeric.columns if str(column) != resource_col]
+        if not candidates:
+            return pd.DataFrame()
+        value_col = candidates[-1]
+
+    base = pd.DataFrame(
+        {
+            "row_index": numeric.index,
+            "item": df[item_col].astype(str) if item_col else [f"option_{idx}" for idx in numeric.index],
+            "scenario": df[scenario_col].astype(str) if scenario_col else "base",
+            "resource": pd.to_numeric(numeric[resource_col], errors="coerce"),
+            "value": pd.to_numeric(numeric[value_col], errors="coerce"),
+            "probability": pd.to_numeric(numeric[probability_col], errors="coerce") if probability_col else np.nan,
+        }
+    ).dropna(subset=["resource", "value"])
+    base = base[(base["resource"] > 0) & (base["value"] > 0)].reset_index(drop=True)
+    if base.empty:
+        return pd.DataFrame()
+
+    if capacity_col is not None:
+        capacity_values = pd.to_numeric(numeric[capacity_col], errors="coerce").dropna()
+        capacity = float(capacity_values.iloc[0]) if not capacity_values.empty else 0.0
+    else:
+        nominal = base.drop_duplicates("item")
+        capacity = float(nominal["resource"].sum() * 0.5)
+    if capacity <= 0:
+        return pd.DataFrame()
+
+    scenarios = _scenario_table(base, explicit=bool(scenario_col))
+    if scenarios.empty:
+        return pd.DataFrame()
+
+    summary = _scenario_item_summary(scenarios)
+    if summary.empty:
+        return pd.DataFrame()
+
+    summary["risk_adjusted_score"] = (
+        0.55 * summary["expected_value"]
+        + 0.35 * summary["worst_case_value"]
+        - 0.10 * summary["max_regret"]
+    )
+    summary["density"] = summary["risk_adjusted_score"] / summary["mean_resource"].clip(lower=1e-9)
+    ranked = summary.sort_values(["density", "worst_case_value"], ascending=False).reset_index(drop=True)
+
+    selected: list[int] = []
+    used_resource = 0.0
+    for idx, row in ranked.iterrows():
+        resource = float(row["mean_resource"])
+        if used_resource + resource <= capacity + 1e-12:
+            selected.append(idx)
+            used_resource += resource
+    selected_set = set(selected)
+
+    rows: list[dict[str, float | int | str]] = []
+    for idx, row in ranked.iterrows():
+        item = str(row["item"])
+        item_scenarios = scenarios[scenarios["item"] == item].sort_values("scenario")
+        for scenario_row in item_scenarios.itertuples(index=False):
+            rows.append(
+                {
+                    "item": item,
+                    "scenario": str(scenario_row.scenario),
+                    "selected": int(idx in selected_set),
+                    "scenario_probability": float(scenario_row.probability),
+                    "resource": float(scenario_row.resource),
+                    "scenario_value": float(scenario_row.value),
+                    "expected_value": float(row["expected_value"]),
+                    "worst_case_value": float(row["worst_case_value"]),
+                    "best_case_value": float(row["best_case_value"]),
+                    "max_regret": float(row["max_regret"]),
+                    "risk_adjusted_score": float(row["risk_adjusted_score"]),
+                    "capacity": capacity,
+                    "total_selected_resource": float(used_resource),
+                    "capacity_slack": float(capacity - used_resource),
+                    "method": "scenario_expected_worstcase_regret_optimization",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def chance_constrained_resource_optimization(df: pd.DataFrame) -> pd.DataFrame:
+    """Select decisions that satisfy a resource chance constraint.
+
+    The model estimates an uncertain resource requirement for each option and
+    inflates it by a service-level quantile. It then selects options by safe
+    value density and reports feasibility/violation probabilities.
+    """
+
+    numeric = df.select_dtypes(include="number").dropna(axis=1, how="all")
+    if numeric.shape[0] < 2 or numeric.shape[1] < 2:
+        return pd.DataFrame()
+
+    item_col = _find_column(df, ("item", "name", "crop", "project", "task", "option", "node", "id"))
+    resource_col = _find_column(
+        numeric,
+        ("resource", "demand", "capacity_used", "weight", "load", "area", "time", "budget_used"),
+    )
+    value_col = _find_column(
+        numeric,
+        BENEFIT_KEYWORDS + ("reward", "margin", "objective"),
+        exclude={resource_col},
+    )
+    std_col = _find_column(
+        numeric,
+        ("std", "sigma", "uncertainty", "deviation", "volatility", "risk"),
+        exclude={resource_col, value_col},
+    )
+    capacity_col = _find_column(
+        numeric,
+        ("capacity", "budget", "limit", "available", "bound", "supply"),
+        exclude={resource_col, value_col, std_col},
+    )
+    service_level_col = _find_column(
+        numeric,
+        ("service_level", "confidence", "reliability", "probability"),
+        exclude={resource_col, value_col, std_col, capacity_col},
+    )
+    if resource_col is None:
+        resource_col = str(numeric.columns[0])
+    if value_col is None:
+        candidates = [str(column) for column in numeric.columns if str(column) != resource_col]
+        if not candidates:
+            return pd.DataFrame()
+        value_col = candidates[-1]
+
+    work = pd.DataFrame(
+        {
+            "row_index": numeric.index,
+            "item": df[item_col].astype(str) if item_col else [f"option_{idx}" for idx in numeric.index],
+            "mean_resource": pd.to_numeric(numeric[resource_col], errors="coerce"),
+            "value": pd.to_numeric(numeric[value_col], errors="coerce"),
+        }
+    )
+    if std_col is not None:
+        work["resource_std"] = pd.to_numeric(numeric[std_col], errors="coerce").abs()
+    else:
+        resource_series = pd.to_numeric(numeric[resource_col], errors="coerce")
+        coefficient = float(resource_series.std() / max(abs(resource_series.mean()), 1e-9)) if resource_series.notna().sum() >= 2 else 0.15
+        work["resource_std"] = pd.to_numeric(work["mean_resource"], errors="coerce").abs() * min(max(coefficient, 0.05), 0.35)
+    work = work.dropna(subset=["mean_resource", "value", "resource_std"])
+    work = work[(work["mean_resource"] > 0) & (work["value"] > 0)].reset_index(drop=True)
+    if work.empty:
+        return pd.DataFrame()
+
+    if capacity_col is not None:
+        capacity_values = pd.to_numeric(numeric[capacity_col], errors="coerce").dropna()
+        capacity = float(capacity_values.iloc[0]) if not capacity_values.empty else 0.0
+    else:
+        capacity = float(work["mean_resource"].sum() * 0.5)
+    if capacity <= 0:
+        return pd.DataFrame()
+
+    if service_level_col is not None:
+        service_values = pd.to_numeric(numeric[service_level_col], errors="coerce").dropna()
+        service_level = float(service_values.iloc[0]) if not service_values.empty else 0.9
+    else:
+        service_level = 0.9
+    if service_level > 1.0:
+        service_level /= 100.0
+    service_level = min(max(service_level, 0.5), 0.99)
+    z_value = _service_level_z(service_level)
+
+    work["safe_resource"] = work["mean_resource"] + z_value * work["resource_std"]
+    work["safe_density"] = work["value"] / work["safe_resource"].clip(lower=1e-9)
+    ranked = work.sort_values(["safe_density", "value"], ascending=False).reset_index(drop=True)
+
+    selected: list[int] = []
+    mean_total = 0.0
+    variance_total = 0.0
+    safe_total = 0.0
+    for idx, row in ranked.iterrows():
+        candidate_safe_total = safe_total + float(row["safe_resource"])
+        if candidate_safe_total <= capacity + 1e-12:
+            selected.append(idx)
+            mean_total += float(row["mean_resource"])
+            variance_total += float(row["resource_std"]) ** 2
+            safe_total = candidate_safe_total
+    selected_set = set(selected)
+    total_std = math.sqrt(max(variance_total, 0.0))
+    feasibility_probability = _normal_cdf((capacity - mean_total) / total_std) if total_std > 0 else float(mean_total <= capacity)
+    violation_probability = 1.0 - feasibility_probability
+    total_value = float(ranked.loc[list(selected_set), "value"].sum()) if selected_set else 0.0
+
+    rows = []
+    for idx, row in ranked.iterrows():
+        rows.append(
+            {
+                "row_index": int(row["row_index"]),
+                "item": str(row["item"]),
+                "selected": int(idx in selected_set),
+                "mean_resource": float(row["mean_resource"]),
+                "resource_std": float(row["resource_std"]),
+                "safe_resource": float(row["safe_resource"]),
+                "value": float(row["value"]),
+                "safe_density": float(row["safe_density"]),
+                "service_level": service_level,
+                "z_value": z_value,
+                "capacity": capacity,
+                "total_mean_resource": float(mean_total),
+                "total_safe_resource": float(safe_total),
+                "capacity_slack": float(capacity - safe_total),
+                "feasibility_probability": float(feasibility_probability),
+                "violation_probability": float(violation_probability),
+                "total_value": total_value,
+                "method": "chance_constrained_resource_optimization",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def cvar_resource_optimization(df: pd.DataFrame) -> pd.DataFrame:
+    """Optimize resource selection with CVaR-style downside risk control."""
+
+    numeric = df.select_dtypes(include="number").dropna(axis=1, how="all")
+    if numeric.shape[0] < 2 or numeric.shape[1] < 2:
+        return pd.DataFrame()
+
+    item_col = _find_column(df, ("item", "name", "crop", "project", "task", "option", "node", "id"))
+    scenario_col = _find_column(df, ("scenario", "case", "state", "condition"))
+    resource_col = _find_column(
+        numeric,
+        ("resource", "capacity_used", "weight", "cost", "area", "time", "budget_used", "load"),
+    )
+    value_col = _find_column(
+        numeric,
+        BENEFIT_KEYWORDS + ("reward", "margin", "objective"),
+        exclude={resource_col},
+    )
+    risk_col = _find_column(
+        numeric,
+        ("loss", "risk", "uncertainty", "std", "sigma", "volatility", "penalty", "shortage"),
+        exclude={resource_col, value_col},
+    )
+    capacity_col = _find_column(
+        numeric,
+        ("capacity", "budget", "limit", "available", "bound"),
+        exclude={resource_col, value_col, risk_col},
+    )
+    alpha_col = _find_column(
+        numeric,
+        ("alpha", "confidence", "cvar_level", "risk_level"),
+        exclude={resource_col, value_col, risk_col, capacity_col},
+    )
+    if resource_col is None:
+        resource_col = str(numeric.columns[0])
+    if value_col is None:
+        candidates = [str(column) for column in numeric.columns if str(column) != resource_col]
+        if not candidates:
+            return pd.DataFrame()
+        value_col = candidates[-1]
+
+    base = pd.DataFrame(
+        {
+            "row_index": numeric.index,
+            "item": df[item_col].astype(str) if item_col else [f"option_{idx}" for idx in numeric.index],
+            "scenario": df[scenario_col].astype(str) if scenario_col else "base",
+            "resource": pd.to_numeric(numeric[resource_col], errors="coerce"),
+            "value": pd.to_numeric(numeric[value_col], errors="coerce"),
+        }
+    )
+    if risk_col is not None:
+        base["risk"] = pd.to_numeric(numeric[risk_col], errors="coerce").abs()
+    else:
+        value_series = pd.to_numeric(numeric[value_col], errors="coerce")
+        coefficient = float(value_series.std() / max(abs(value_series.mean()), 1e-9)) if value_series.notna().sum() >= 2 else 0.15
+        base["risk"] = pd.to_numeric(base["value"], errors="coerce").abs() * min(max(coefficient, 0.05), 0.35)
+    base = base.dropna(subset=["resource", "value", "risk"])
+    base = base[(base["resource"] > 0) & (base["value"] > 0)].reset_index(drop=True)
+    if base.empty:
+        return pd.DataFrame()
+
+    if capacity_col is not None:
+        capacity_values = pd.to_numeric(numeric[capacity_col], errors="coerce").dropna()
+        capacity = float(capacity_values.iloc[0]) if not capacity_values.empty else 0.0
+    else:
+        capacity = float(base.drop_duplicates("item")["resource"].sum() * 0.5)
+    if capacity <= 0:
+        return pd.DataFrame()
+
+    if alpha_col is not None:
+        alpha_values = pd.to_numeric(numeric[alpha_col], errors="coerce").dropna()
+        alpha = float(alpha_values.iloc[0]) if not alpha_values.empty else 0.9
+    else:
+        alpha = 0.9
+    if alpha > 1.0:
+        alpha /= 100.0
+    alpha = min(max(alpha, 0.5), 0.99)
+
+    scenarios = _cvar_scenario_table(base, explicit=bool(scenario_col))
+    summary = _cvar_item_summary(scenarios, alpha=alpha)
+    if summary.empty:
+        return pd.DataFrame()
+    risk_aversion = 0.65
+    summary["risk_adjusted_score"] = summary["expected_value"] - risk_aversion * summary["cvar_loss"]
+    summary["risk_adjusted_density"] = summary["risk_adjusted_score"] / summary["mean_resource"].clip(lower=1e-9)
+    ranked = summary.sort_values(["risk_adjusted_density", "expected_value"], ascending=False).reset_index(drop=True)
+
+    selected: list[int] = []
+    used_resource = 0.0
+    for idx, row in ranked.iterrows():
+        resource = float(row["mean_resource"])
+        if used_resource + resource <= capacity + 1e-12:
+            selected.append(idx)
+            used_resource += resource
+    selected_set = set(selected)
+    total_expected_value = float(ranked.loc[list(selected_set), "expected_value"].sum()) if selected_set else 0.0
+    total_cvar_loss = float(ranked.loc[list(selected_set), "cvar_loss"].sum()) if selected_set else 0.0
+
+    rows: list[dict[str, float | int | str]] = []
+    for idx, row in ranked.iterrows():
+        rows.append(
+            {
+                "item": str(row["item"]),
+                "selected": int(idx in selected_set),
+                "mean_resource": float(row["mean_resource"]),
+                "expected_value": float(row["expected_value"]),
+                "worst_case_value": float(row["worst_case_value"]),
+                "var_loss": float(row["var_loss"]),
+                "cvar_loss": float(row["cvar_loss"]),
+                "tail_scenario_count": int(row["tail_scenario_count"]),
+                "risk_adjusted_score": float(row["risk_adjusted_score"]),
+                "risk_adjusted_density": float(row["risk_adjusted_density"]),
+                "confidence_level": alpha,
+                "capacity": capacity,
+                "total_selected_resource": float(used_resource),
+                "capacity_slack": float(capacity - used_resource),
+                "total_expected_value": total_expected_value,
+                "total_cvar_loss": total_cvar_loss,
+                "method": "cvar_tail_risk_resource_optimization",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def astar_path_plan(df: pd.DataFrame) -> pd.DataFrame:
     edges = _extract_edges(df)
     if not edges.empty:
@@ -396,6 +883,149 @@ def _find_column(df: pd.DataFrame, keywords: tuple[str, ...], exclude: set[str |
         if _looks_like(str(column), keywords):
             return str(column)
     return None
+
+
+def _scenario_table(base: pd.DataFrame, *, explicit: bool) -> pd.DataFrame:
+    if explicit:
+        scenarios = base.copy()
+        probability = pd.to_numeric(scenarios["probability"], errors="coerce")
+        if probability.notna().sum() == 0:
+            counts = scenarios.groupby("scenario")["scenario"].transform("count")
+            scenario_count = max(int(scenarios["scenario"].nunique()), 1)
+            scenarios["probability"] = 1.0 / scenario_count / counts
+        else:
+            scenarios["probability"] = probability.fillna(0.0)
+            total = float(scenarios["probability"].sum())
+            scenarios["probability"] = scenarios["probability"] / total if total > 0 else 1.0 / len(scenarios)
+        return scenarios
+
+    rows: list[dict[str, float | str]] = []
+    for row in base.itertuples(index=False):
+        for scenario, multiplier, probability in (
+            ("pessimistic", 0.8, 0.25),
+            ("base", 1.0, 0.50),
+            ("optimistic", 1.15, 0.25),
+        ):
+            rows.append(
+                {
+                    "item": str(row.item),
+                    "scenario": scenario,
+                    "resource": float(row.resource),
+                    "value": float(row.value) * multiplier,
+                    "probability": probability,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _scenario_item_summary(scenarios: pd.DataFrame) -> pd.DataFrame:
+    if scenarios.empty:
+        return pd.DataFrame()
+    scenario_best = scenarios.groupby("scenario")["value"].max().to_dict()
+    rows = []
+    for item, group in scenarios.groupby("item"):
+        probabilities = pd.to_numeric(group["probability"], errors="coerce").fillna(0.0)
+        total_probability = float(probabilities.sum())
+        if total_probability <= 0:
+            probabilities = pd.Series(np.ones(len(group)) / len(group), index=group.index)
+        else:
+            probabilities = probabilities / total_probability
+        values = pd.to_numeric(group["value"], errors="coerce").fillna(0.0)
+        resources = pd.to_numeric(group["resource"], errors="coerce").fillna(0.0)
+        regrets = [
+            float(scenario_best.get(str(scenario), value) - value)
+            for scenario, value in zip(group["scenario"], values)
+        ]
+        rows.append(
+            {
+                "item": str(item),
+                "expected_value": float((values * probabilities).sum()),
+                "worst_case_value": float(values.min()),
+                "best_case_value": float(values.max()),
+                "max_regret": float(max(regrets) if regrets else 0.0),
+                "mean_resource": float(resources.mean()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _cvar_scenario_table(base: pd.DataFrame, *, explicit: bool) -> pd.DataFrame:
+    if explicit:
+        scenarios = base.copy()
+        scenarios["loss"] = (scenarios["value"].max() - scenarios["value"] + scenarios["risk"]).clip(lower=0.0)
+        return scenarios
+
+    rows: list[dict[str, float | str]] = []
+    for row in base.itertuples(index=False):
+        for scenario, value_multiplier, risk_multiplier in (
+            ("normal", 1.0, 1.0),
+            ("stress", 0.85, 1.4),
+            ("tail", 0.65, 2.0),
+        ):
+            value = float(row.value) * value_multiplier
+            risk = float(row.risk) * risk_multiplier
+            rows.append(
+                {
+                    "item": str(row.item),
+                    "scenario": scenario,
+                    "resource": float(row.resource),
+                    "value": value,
+                    "risk": risk,
+                    "loss": max(0.0, float(row.value) - value + risk),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _cvar_item_summary(scenarios: pd.DataFrame, *, alpha: float) -> pd.DataFrame:
+    if scenarios.empty:
+        return pd.DataFrame()
+    rows = []
+    for item, group in scenarios.groupby("item"):
+        values = pd.to_numeric(group["value"], errors="coerce").dropna()
+        losses = pd.to_numeric(group["loss"], errors="coerce").dropna()
+        resources = pd.to_numeric(group["resource"], errors="coerce").dropna()
+        if values.empty or losses.empty or resources.empty:
+            continue
+        var_loss = float(losses.quantile(alpha, interpolation="higher"))
+        tail = losses[losses >= var_loss]
+        rows.append(
+            {
+                "item": str(item),
+                "mean_resource": float(resources.mean()),
+                "expected_value": float(values.mean()),
+                "worst_case_value": float(values.min()),
+                "var_loss": var_loss,
+                "cvar_loss": float(tail.mean()) if not tail.empty else var_loss,
+                "tail_scenario_count": int(len(tail)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _service_level_z(service_level: float) -> float:
+    table = (
+        (0.50, 0.0),
+        (0.80, 0.8416),
+        (0.85, 1.0364),
+        (0.90, 1.2816),
+        (0.95, 1.6449),
+        (0.975, 1.96),
+        (0.99, 2.3263),
+    )
+    best_level, best_z = min(table, key=lambda item: abs(item[0] - service_level))
+    if abs(best_level - service_level) <= 0.015:
+        return best_z
+    lower = max((item for item in table if item[0] <= service_level), default=table[0])
+    upper = min((item for item in table if item[0] >= service_level), default=table[-1])
+    if lower[0] == upper[0]:
+        return lower[1]
+    weight = (service_level - lower[0]) / (upper[0] - lower[0])
+    return float(lower[1] + weight * (upper[1] - lower[1]))
+
+
+def _normal_cdf(value: float) -> float:
+    return float(0.5 * (1.0 + math.erf(value / math.sqrt(2.0))))
 
 
 def _looks_like(name: str, keywords: tuple[str, ...]) -> bool:

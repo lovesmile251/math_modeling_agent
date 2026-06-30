@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import tools.contest_simulation as contest_simulation
 from tools.contest_simulation import evaluate_contest_readiness, format_contest_report
 
 
@@ -40,6 +41,7 @@ def test_contest_simulation_scores_first_prize_ready_case():
                     "task_traceability_gate": "passed",
                     "strong_baseline_gate": "passed",
                     "innovation_evidence_gate": "passed",
+                    "paper_evidence_gate": "passed",
                 },
                 "workspace": "workspace/toy-a",
             }
@@ -136,6 +138,7 @@ def test_contest_simulation_uses_answer_correctness_gold(tmp_path: Path):
                     "task_traceability_gate": "passed",
                     "strong_baseline_gate": "passed",
                     "innovation_evidence_gate": "passed",
+                    "paper_evidence_gate": "passed",
                 },
                 "workspace": str(workspace),
             }
@@ -157,6 +160,103 @@ def test_contest_simulation_uses_answer_correctness_gold(tmp_path: Path):
     assert result["dimension_scores"]["answer_correctness"] == 0
     assert result["readiness_band"] != "first_prize_ready"
     assert any("answer correctness" in risk for risk in result["risks"])
+
+
+def test_contest_simulation_penalizes_failed_paper_evidence_gate():
+    drill_summary = {
+        "results": [
+            {
+                "case_id": "toy-d",
+                "title": "paper evidence gate case",
+                "elapsed_seconds": 1200,
+                "execution_status": "success",
+                "execution_attempts": 1,
+                "produced_models": [
+                    "inventory_policy",
+                    "error_analysis",
+                    "sensitivity_analysis",
+                    "model_comparison",
+                ],
+                "missing_models": [],
+                "empty_models": [],
+                "table_count": 14,
+                "figure_count": 9,
+                "paper_quality_score": 95,
+                "error_count": 0,
+                "artifacts": {
+                    "code": "code.py",
+                    "paper": "paper.md",
+                    "paper_quality": "quality.md",
+                    "claim_evidence_map": "claims.json",
+                },
+                "quality_gates": {
+                    "export_quality_gate": "passed",
+                    "task_traceability_gate": "passed",
+                    "strong_baseline_gate": "passed",
+                    "innovation_evidence_gate": "passed",
+                    "paper_evidence_gate": "failed",
+                },
+                "workspace": "workspace/toy-d",
+            }
+        ]
+    }
+
+    summary = evaluate_contest_readiness(drill_summary, time_budget_seconds=6 * 3600)
+    result = summary["results"][0]
+
+    assert result["readiness_band"] != "first_prize_ready"
+    assert result["dimension_scores"]["gate_integrity"] < 7
+    assert any("paper_evidence_gate" in risk for risk in result["risks"])
+
+
+def test_contest_simulation_writes_pressure_audit(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    def fake_drill(**kwargs):
+        captured.update(kwargs)
+        return {
+            "results": [
+                {
+                    "case_id": "toy-pressure",
+                    "title": "pressure case",
+                    "elapsed_seconds": 1200,
+                    "execution_status": "success",
+                    "execution_attempts": 1,
+                    "produced_models": ["trend_forecast"],
+                    "missing_models": [],
+                    "empty_models": [],
+                    "table_count": 1,
+                    "figure_count": 0,
+                    "paper_quality_score": 70,
+                    "error_count": 0,
+                    "score": 60.0,
+                    "artifacts": {"code": "code.py", "paper": "paper.md"},
+                    "quality_gates": {"paper_evidence_gate": "failed"},
+                    "workspace": str(tmp_path / "workspace"),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(contest_simulation, "run_real_case_drill", fake_drill)
+
+    contest_simulation.run_contest_simulation(
+        corpus_index_path=tmp_path / "index.json",
+        corpus_root=tmp_path / "corpus",
+        output_dir=tmp_path / "results",
+        runs_root=tmp_path / "runs",
+        limit=1,
+        candidate_profile=True,
+    )
+
+    assert captured["export_formats"] == ["docx"]
+    assert (tmp_path / "results" / "pressure_audit.json").exists()
+    assert (tmp_path / "results" / "pressure_audit.md").exists()
+    assert (tmp_path / "results" / "final_delivery_benchmark.json").exists()
+    assert (tmp_path / "results" / "final_delivery_benchmark.md").exists()
+    final_payload = json.loads(
+        (tmp_path / "results" / "final_delivery_benchmark.json").read_text(encoding="utf-8")
+    )
+    assert final_payload["checks"]["candidate_profile"]["passed"] is True
 
 
 def test_contest_report_contains_key_metrics():

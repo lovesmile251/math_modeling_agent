@@ -245,10 +245,15 @@ class ModelingWorkflow:
         setup_logging(self.workspace.logs_dir)
         self.llm.set_log_path(self.workspace.logs_dir / "llm_calls.jsonl")
 
+        explicit_data_files = data_files is not None
         selected_data_files = list_data_files(data_files or [])
-        if not selected_data_files:
+        if not explicit_data_files and not selected_data_files:
             selected_data_files = discover_data_files(self.workspace.data_dir)
-        if not selected_data_files and self.workspace.root != WORKSPACE.root:
+        if (
+            not explicit_data_files
+            and not selected_data_files
+            and self.workspace.root != WORKSPACE.root
+        ):
             selected_data_files = discover_data_files(WORKSPACE.data_dir)
 
         state = WorkflowState(

@@ -238,6 +238,10 @@ ADVANCED_MODEL_REGISTRY: list[tuple[str, str, str, str, str | None]] = [
     ("nonlinear_optimization", "nonlinear_optimization", "models.optimization.advanced", "nonlinear_gradient_optimization", None),
     ("integer_programming", "integer_programming", "models.optimization.advanced", "integer_branch_bound", None),
     ("multiobjective_optimization", "multiobjective_optimization", "models.optimization.advanced", "multiobjective_weighted_sum", None),
+    ("robust_optimization", "robust_optimization", "models.optimization.advanced", "robust_resource_optimization", None),
+    ("scenario_optimization", "scenario_optimization", "models.optimization.advanced", "scenario_resource_optimization", None),
+    ("chance_constrained_optimization", "chance_constrained_optimization", "models.optimization.advanced", "chance_constrained_resource_optimization", None),
+    ("cvar_optimization", "cvar_optimization", "models.optimization.advanced", "cvar_resource_optimization", None),
     ("dynamic_programming_plan", "dynamic_programming_plan", "models.optimization.advanced", "dynamic_programming_plan", None),
     ("astar_path", "astar_path", "models.optimization.advanced", "astar_path_plan", None),
     ("tsp_route", "tsp_route", "models.optimization.advanced", "tsp_route_heuristic", None),
@@ -261,6 +265,7 @@ ADVANCED_MODEL_REGISTRY: list[tuple[str, str, str, str, str | None]] = [
     # mechanism
     ("logistic_growth", "logistic_growth", "models.mechanism.dynamics", "logistic_growth_model", None),
     ("sir_model", "sir_model", "models.mechanism.dynamics", "sir_epidemic_model", None),
+    ("seir_model", "seir_model", "models.mechanism.dynamics", "seir_epidemic_model", None),
     ("lotka_volterra", "lotka_volterra", "models.mechanism.dynamics", "lotka_volterra_model", None),
     ("solow_growth", "solow_growth", "models.mechanism.dynamics", "solow_growth_model", None),
     ("heat_conduction", "heat_conduction", "models.mechanism.dynamics", "heat_conduction_1d", None),

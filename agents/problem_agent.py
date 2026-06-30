@@ -8,6 +8,7 @@ from agents.base import A_PROBLEM_SPEC, A_TASK_DELIVERABLE_SPEC, Agent, ProblemS
 from agents.model_selection_crew import DataProfileAgent, TaskDecompositionAgent
 from tools.data_profiler import summarize_data_files
 from tools.file_tool import write_text
+from tools.modeling_dsl import normalize_subproblems
 from tools.prompt_loader import load_prompt
 
 
@@ -67,10 +68,10 @@ class ProblemAgent(Agent):
     def _build_problem_spec(self, state, tasks, profile) -> ProblemSpec:
         text = state.problem_text.strip()
         subproblems: list[dict] = []
-        for task in tasks:
+        for index, task in enumerate(tasks, start=1):
             subproblems.append(
                 {
-                    "id": task.task_id,
+                    "id": self._normalize_task_id(task.task_id, index),
                     "task_type": task.task_type,
                     "objective": task.goal,
                     "source_text": task.source_text,
@@ -116,9 +117,14 @@ class ProblemAgent(Agent):
         assumptions = self._initial_assumptions(tasks, profile)
         data_requirements = self._data_requirements(tasks, profile)
 
+        normalized_subproblems = normalize_subproblems(subproblems)
+
         return ProblemSpec(
-            sub_questions=[task.source_text or task.goal for task in tasks],
-            subproblems=subproblems,
+            sub_questions=[
+                str(task.get("source_text") or task.get("objective") or "")
+                for task in normalized_subproblems
+            ],
+            subproblems=normalized_subproblems,
             inputs=[str(path) for path in state.data_files],
             outputs=outputs,
             observed_variables=observed,
@@ -289,7 +295,7 @@ class ProblemAgent(Agent):
 
     def _extract_metric_terms(self, text: str) -> list[str]:
         aliases = {
-            "RMSE": ("rmse", "均方根误差"),
+            "RMSE": ("rmse", "mse", "均方根误差"),
             "MAE": ("mae", "平均绝对误差"),
             "MAPE": ("mape", "平均绝对百分比误差"),
             "R²": ("r2", "r²", "决定系数"),
@@ -306,6 +312,10 @@ class ProblemAgent(Agent):
             for column in columns
             if any(term.lower() in column.lower() for term in terms)
         ]
+
+    def _normalize_task_id(self, task_id: str, index: int) -> str:
+        match = re.search(r"(\d+)", task_id or "")
+        return f"Q{match.group(1) if match else index}"
 
     def _ambiguities(self, tasks, profile, decision_variables: list[str]) -> list[str]:
         issues: list[str] = []
